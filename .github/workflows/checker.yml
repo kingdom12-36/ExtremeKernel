@@ -1,0 +1,57 @@
+name: Artifact Inspector (Remote Check)
+
+on:
+  workflow_dispatch: # تشغيل يدوي
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get install -y curl unzip
+
+      - name: Download and Unzip Artifact
+        run: |
+          # سنستخدم التوكن الافتراضي للتحميل
+          # ملاحظة: التحميل عبر API يحتاج معرفة الـ Artifact ID
+          # الرابط اللي بعته يحتوي على ID: 6835021798
+          
+          echo "Downloading artifact 6835021798..."
+          curl -L \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/artifacts/6835021798/zip \
+            -o artifact.zip
+
+          echo "Unzipping content..."
+          unzip artifact.zip -d extracted_content
+
+      - name: Analyze Sizes and Report
+        run: |
+          echo "==============================================="
+          echo "      EXTRACTED KERNEL ARTIFACT REPORT        "
+          echo "==============================================="
+          echo ""
+          
+          # عرض حجم كل الملفات الناتجة بالميجابايت
+          ls -lhR extracted_content
+          
+          echo -e "\n[!] Target File Analysis (Kernel Image):"
+          # البحث عن ملف Image وتحديد حجمه بالدقة
+          find extracted_content -name "Image*" -exec du -sh {} +
+          
+          echo -e "\n[!] Recovery Image Analysis (if exists):"
+          find extracted_content -name "recovery.img" -exec du -sh {} +
+
+          echo -e "\n[!] Partition Margin Check:"
+          # عملية حسابية بسيطة لمعرفة المساحة المتبقية للـ d2s (64MB)
+          RECOVERY_SIZE=$(find extracted_content -name "recovery.img" -exec stat -c%s {} \;)
+          if [ ! -z "$RECOVERY_SIZE" ]; then
+            LIMIT=67108864 # 64MB in bytes
+            DIFF=$(( (LIMIT - RECOVERY_SIZE) / 1024 / 1024 ))
+            echo "Remaining space in 64MB partition: $DIFF MB"
+          else
+            echo "recovery.img not found in this build."
+          fi
+          
+          echo "==============================================="
