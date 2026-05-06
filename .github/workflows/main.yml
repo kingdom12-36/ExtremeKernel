@@ -1,0 +1,57 @@
+name: Build Recovery-Specific Kernel
+
+on:
+  workflow_dispatch: # تشغيل يدوي
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
+
+      - name: Setup Build Environment
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          # إذا كنت بتستخدم Clang (أفضل للحجم)
+          echo "CC=clang" >> $GITHUB_ENV
+
+      - name: Merge Configs & Prep
+        run: |
+          # 1. دمج الـ Configs بالترتيب (الأساسي ثم الموديل ثم الريكفري)
+          # هاد هو السر اللي بيخلي الكيرنل يطلع "نحيف"
+          make exynos9820_defconfig
+          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/d2s.config
+          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/recovery.config
+          
+          # 2. التأكد من تطبيق "Optimize for Size"
+          sed -i 's/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y/# CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE is not set/g' .config
+          echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> .config
+          
+          # 3. تحديث الـ Config النهائي
+          make olddefconfig
+
+      - name: Build Kernel Image
+        run: |
+          make -j$(nproc --all) Image
+
+      - name: Post-Build Stripping (Crucial for Size)
+        run: |
+          # تنظيف ملف الـ Image من أي رموز تصحيحية زايدة يدوياً
+          llvm-strip -g arch/arm64/boot/Image
+          cp arch/arm64/boot/Image recovery_kernel_Image
+
+      - name: Upload Recovery Kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: Recovery-Kernel-d2s
+          path: recovery_kernel_Image
