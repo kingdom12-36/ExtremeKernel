@@ -135,6 +135,18 @@ rm -rf build/out/$MODEL
 mkdir -p build/out/$MODEL/zip/files
 mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
 
+# Apply susfs kernel patches (required for KernelSU susfs support)
+echo "-----------------------------------------------"
+echo "Applying susfs kernel patches..."
+echo "-----------------------------------------------"
+SUSFS_PATCH="build/patches/50_add_susfs_in_kernel-4.14.patch"
+if [ -f "$SUSFS_PATCH" ]; then
+    patch -p1 --forward --batch < "$SUSFS_PATCH" && echo "susfs patches applied." || echo "susfs patches already applied or skipped."
+else
+    echo "susfs patch not found at $SUSFS_PATCH, skipping."
+fi
+echo "-----------------------------------------------"
+
 # Build kernel image
 echo "-----------------------------------------------"
 echo "Defconfig: "$KERNEL_DEFCONFIG""
