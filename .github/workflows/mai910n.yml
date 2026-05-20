@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
-          token: ${{ secrets.EM }}
+          token: ${{ secrets.GITHUB_PERSONAL_ACCESS_TOKEN }}
 
       - name: Set Git identity
         run: |
@@ -26,7 +26,7 @@ jobs:
 
       - name: Authenticate remote
         run: |
-          git remote set-url origin https://x-access-token:${{ secrets.EM }}@github.com/${{ github.repository }}
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}
 
       - name: Sync submodule
         run: git submodule sync --recursive
@@ -35,20 +35,15 @@ jobs:
         run: |
           git submodule update --init --force --recursive KernelSU-Next
 
-      - name: Update KernelSU-Next pointer
+      - name: Update KernelSU-Next to latest legacy-susfs
         run: |
           cd KernelSU-Next
-
-          git fetch origin
-
-          git checkout fc33995cedc5e0ebf719745c71fe15e78694260f
-
+          git fetch origin legacy-susfs
+          git checkout 4cc162e027cc36f8e4d4e6a554e9aa07cac4d4f0
           cd ..
 
-      - name: Commit updated pointer
+      - name: Commit and push updated pointer
         run: |
           git add KernelSU-Next
-
-          git commit -m "KernelSU-Next: bump to fc33995" || echo "No changes to commit"
-
+          git commit -m "KernelSU-Next: bump to legacy-susfs 4cc162e (susfs support)" || echo "No changes to commit"
           git push origin HEAD:main
