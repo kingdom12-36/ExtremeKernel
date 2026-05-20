@@ -1,0 +1,56 @@
+name: Update KernelSU-Next Submodule
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-submodule:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update KernelSU-Next
+        run: |
+          git submodule update --init --recursive
+
+          cd KernelSU-Next
+
+          git fetch origin
+
+          git checkout main
+          git pull origin main
+
+          LATEST_COMMIT=$(git rev-parse HEAD)
+
+          echo "Latest KernelSU-Next commit:"
+          echo "$LATEST_COMMIT"
+
+          cd ..
+
+          git add KernelSU-Next
+
+          git diff --cached --quiet && echo "No changes detected" && exit 0
+
+          git commit -m "KernelSU-Next: bump to ${LATEST_COMMIT}"
+
+          git push
+
+      - name: Show current submodule status
+        run: |
+          git submodule status
