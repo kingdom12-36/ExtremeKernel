@@ -88,7 +88,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Akernel-d2s
+          name: ExtremeKRNL-Nexus-d2s
           path: build/out/d2s/zip
 
   build_d2x:
