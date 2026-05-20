@@ -1,0 +1,58 @@
+name: Debug KernelSU Version
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-ksu:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show KernelSU git state
+        run: |
+          cd KernelSU-Next
+
+          echo "========== BASIC INFO =========="
+          pwd
+
+          echo ""
+          echo "========== CURRENT COMMIT =========="
+          git log --oneline -1
+
+          echo ""
+          echo "========== COMMIT COUNT =========="
+          git rev-list --count HEAD
+
+          echo ""
+          echo "========== TAG =========="
+          git describe --tags --abbrev=0 || true
+
+          echo ""
+          echo "========== SHALLOW CHECK =========="
+          if [ -f .git/shallow ]; then
+            echo "Repository is SHALLOW"
+          else
+            echo "Repository is FULL"
+          fi
+
+          echo ""
+          echo "========== REMOTE =========="
+          git remote -v
+
+          echo ""
+          echo "========== BRANCH =========="
+          git branch -a
+
+          echo ""
+          echo "========== VERSION CALCULATION =========="
+          COUNT=$(git rev-list --count HEAD)
+          VERSION=$((30000 + COUNT + 150))
+
+          echo "KSU_GIT_VERSION=$COUNT"
+          echo "EXPECTED_KSU_VERSION=$VERSION"
