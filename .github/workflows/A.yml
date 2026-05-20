@@ -1,0 +1,119 @@
+name: ExtremeKernel d2s Build (with KernelSU + KPatch + fingerprint)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build_d2s:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl \
+            zlib1g-dev libc6-dev-i386 libxml2-utils xsltproc unzip fontconfig
+
+      - name: Sync submodules (deterministic)
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+
+      - name: Build fingerprint (Kernel + KSU)
+        run: |
+          echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+          cd KernelSU-Next
+          echo "KSU_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+          COUNT=$(git rev-list --count HEAD)
+          VERSION=$((30000 + COUNT + 150))
+
+          echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
+
+          echo "Kernel: $KERNEL_COMMIT"
+          echo "KernelSU: $KSU_COMMIT"
+          echo "KSU Version: $KSU_VERSION"
+
+      - name: Build d2s
+        run: |
+          chmod +x ./workflows.sh
+          ./workflows.sh -m d2s -k Y -r N
+
+      - name: Setup KPatch-Next tools
+        run: |
+          KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+
+          echo "KPatch version: $KPATCH_VER"
+
+          curl -Lo kptools https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
+          curl -Lo kpimg   https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
+
+          chmod +x kptools kpimg
+          ./kptools --version || true
+
+      - name: Patch kernel with KPatch-Next
+        run: |
+          IMAGE=build/out/d2s/Image
+          PATCHED_IMAGE=build/out/d2s/Image.kp
+
+          ./kptools -i "$IMAGE" -l || true
+          ./kptools -p -i "$IMAGE" -k ./kpimg -o "$PATCHED_IMAGE"
+
+          mkdir -p build/out/d2s-kpatch/zip/files
+          mkdir -p build/out/d2s-kpatch/zip/META-INF/com/google/android
+
+          cp build/out/d2s/dtb.img build/out/d2s-kpatch/zip/files/dtb.img
+          cp build/out/d2s/dtbo.img build/out/d2s-kpatch/zip/files/dtbo.img
+          cp build/update-binary build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
+          cp build/updater-script build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
+
+          ./toolchain/mkbootimg \
+            --base 0x10000000 \
+            --board SRPSC14B009KU \
+            --cmdline 'loop.max_part=7' \
+            --hashtype sha1 \
+            --header_version 1 \
+            --kernel "$PATCHED_IMAGE" \
+            --kernel_offset 0x00008000 \
+            --os_patch_level 2025-01 \
+            --os_version 14.0.0 \
+            --pagesize 2048 \
+            --ramdisk build/out/d2s/ramdisk.cpio.gz \
+            --ramdisk_offset 0xF0000000 \
+            --second_offset 0xF0000000 \
+            --tags_offset 0x00000100 \
+            -o build/out/d2s-kpatch/zip/files/boot.img
+
+      - name: Save build metadata
+        run: |
+          mkdir -p build/out/meta
+
+          echo "Kernel Commit: $KERNEL_COMMIT" > build/out/meta/build-info.txt
+          echo "KernelSU Commit: $KSU_COMMIT" >> build/out/meta/build-info.txt
+          echo "KernelSU Version: $KSU_VERSION" >> build/out/meta/build-info.txt
+
+      - name: Inject metadata into artifacts
+        run: |
+          cp build/out/meta/build-info.txt build/out/d2s/zip/
+          cp build/out/meta/build-info.txt build/out/d2s-kpatch/zip/
+
+      - name: Upload standard kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2s-KSU${{ env.KSU_VERSION }}
+          path: build/out/d2s/zip
+
+      - name: Upload KPatch kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2s-KPatch-KSU${{ env.KSU_VERSION }}
+          path: build/out/d2s-kpatch/zip
