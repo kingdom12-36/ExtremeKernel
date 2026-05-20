@@ -1,4 +1,4 @@
-name: ExtremeKernel d2s Build (with KernelSU + KPatch + fingerprint)
+name: ExtremeKernel d2s Build (stable + correct fingerprint)
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
 jobs:
   build_d2s:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout source
@@ -27,10 +30,12 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive --force
 
-      - name: Build fingerprint (Kernel + KSU)
+      - name: Kernel fingerprint (stable)
         run: |
           echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
+      - name: KernelSU fingerprint + version
+        run: |
           cd KernelSU-Next
           echo "KSU_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
@@ -39,11 +44,20 @@ jobs:
 
           echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
 
-          echo "Kernel: $KERNEL_COMMIT"
-          echo "KernelSU: $KSU_COMMIT"
-          echo "KSU Version: $KSU_VERSION"
+          echo "KernelSU commit: $(git rev-parse HEAD)"
+          echo "KernelSU version: $VERSION"
 
-      - name: Build d2s
+          cd ..
+
+      - name: Show fingerprint summary
+        run: |
+          echo "===================="
+          echo "Kernel commit: $KERNEL_COMMIT"
+          echo "KernelSU commit: $KSU_COMMIT"
+          echo "KernelSU version: $KSU_VERSION"
+          echo "===================="
+
+      - name: Build d2s kernel
         run: |
           chmod +x ./workflows.sh
           ./workflows.sh -m d2s -k Y -r N
@@ -51,7 +65,6 @@ jobs:
       - name: Setup KPatch-Next tools
         run: |
           KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-
           echo "KPatch version: $KPATCH_VER"
 
           curl -Lo kptools https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
@@ -96,7 +109,6 @@ jobs:
       - name: Save build metadata
         run: |
           mkdir -p build/out/meta
-
           echo "Kernel Commit: $KERNEL_COMMIT" > build/out/meta/build-info.txt
           echo "KernelSU Commit: $KSU_COMMIT" >> build/out/meta/build-info.txt
           echo "KernelSU Version: $KSU_VERSION" >> build/out/meta/build-info.txt
