@@ -1,56 +1,54 @@
-name: Update KernelSU-Next Submodule
+name: Update KernelSU-Next Submodule Pointer
 
 on:
+  push: 
   workflow_dispatch:
-  schedule:
-    - cron: "0 */6 * * *"
-
-permissions:
-  contents: write
 
 jobs:
-  update-submodule:
+  update:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
           token: ${{ secrets.EM }}
 
-      - name: Configure Git
+      - name: Set Git identity
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Update KernelSU-Next
+      - name: Authenticate remote
         run: |
-          git submodule update --init --recursive
+          git remote set-url origin https://x-access-token:${{ secrets.EM }}@github.com/${{ github.repository }}
 
+      - name: Sync submodule
+        run: git submodule sync --recursive
+
+      - name: Initialize submodule
+        run: |
+          git submodule update --init --force --recursive KernelSU-Next
+
+      - name: Update KernelSU-Next pointer
+        run: |
           cd KernelSU-Next
 
           git fetch origin
 
-          git checkout main
-          git pull origin main
-
-          LATEST_COMMIT=$(git rev-parse HEAD)
-
-          echo "Latest KernelSU-Next commit:"
-          echo "$LATEST_COMMIT"
+          git checkout fc33995cedc5e0ebf719745c71fe15e78694260f
 
           cd ..
 
+      - name: Commit updated pointer
+        run: |
           git add KernelSU-Next
 
-          git diff --cached --quiet && echo "No changes detected" && exit 0
+          git commit -m "KernelSU-Next: bump to fc33995" || echo "No changes to commit"
 
-          git commit -m "KernelSU-Next: bump to ${LATEST_COMMIT}"
-
-          git push
-
-      - name: Show current submodule status
-        run: |
-          git submodule status
+          git push origin HEAD:main
