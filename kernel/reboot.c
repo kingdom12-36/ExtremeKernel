@@ -279,6 +279,10 @@ static DEFINE_MUTEX(reboot_mutex);
  * and even root needs to set up some magic numbers in the registers
  * so that some mistake won't make this reboot the whole machine.
  * You can also set the meaning of the ctrl-alt-del-key here.
+#ifdef CONFIG_KSU
+extern void ksu_handle_sys_reboot(void);
+#endif
+
  *
  * reboot doesn't sync: do that yourself before calling this.
  */
@@ -317,6 +321,9 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		cmd = LINUX_REBOOT_CMD_HALT;
 
 	mutex_lock(&reboot_mutex);
+	#ifdef CONFIG_KSU
+	ksu_handle_sys_reboot();
+	#endif
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		kernel_restart(NULL);
