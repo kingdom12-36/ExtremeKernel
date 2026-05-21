@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-kpm:
-    name: Build extreme-tweaker.kpm
+    name: Build KPM Modules
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -27,12 +27,10 @@ jobs:
         run: |
           curl -Lo toolchain.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu/12.2.rel1/binrel/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf.tar.xz
           tar -Jxf toolchain.tar.xz
-          echo "Toolchain ready"
 
       - name: Clone KPatch-Next (kernel headers)
         run: |
           git clone --depth=1 https://github.com/KernelSU-Next/KPatch-Next.git kpatch-next
-          echo "Headers ready"
 
       - name: Build extreme-tweaker.kpm
         run: |
@@ -40,48 +38,82 @@ jobs:
           export KP_DIR=$PWD/kpatch-next
           cd kpms/extreme-tweaker
           make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR"
-          echo "--- Output ---"
           ls -lh extreme-tweaker.kpm
           file extreme-tweaker.kpm
 
-      - name: Upload artifact
+      - name: Build battery-saver.kpm
+        run: |
+          export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
+          export KP_DIR=$PWD/kpatch-next
+          cd kpms/battery-saver
+          make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR"
+          ls -lh battery-saver.kpm
+          file battery-saver.kpm
+
+      - name: Upload both KPMs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: extreme-tweaker-kpm
-          path: kpms/extreme-tweaker/extreme-tweaker.kpm
+          name: ExtremeKernel-KPMs
+          path: |
+            kpms/extreme-tweaker/extreme-tweaker.kpm
+            kpms/battery-saver/battery-saver.kpm
           if-no-files-found: error
 
-      - name: Create release
+      - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: kpm-v${{ github.run_number }}
-          name: "ExtremeKernel KPM Modules (build ${{ github.run_number }})"
-          artifacts: kpms/extreme-tweaker/extreme-tweaker.kpm
+          name: "ExtremeKernel KPMs (build ${{ github.run_number }})"
+          artifacts: |
+            kpms/extreme-tweaker/extreme-tweaker.kpm
+            kpms/battery-saver/battery-saver.kpm
           allowUpdates: true
           replacesArtifacts: true
           body: |
-            ## extreme-tweaker.kpm
+            ## ExtremeKernel KPM Modules
 
-            Performance sysctl tweaker for **Samsung Galaxy S20 Ultra (d2s, Exynos 9825)**.
             Built against KPatch-Next ${{ steps.kpver.outputs.version }}.
+            Target: **Samsung Galaxy S20 Ultra (d2s, Exynos 9825, kernel 4.14)**
 
-            ### What it tweaks (applied on every boot)
+            ---
 
-            | Setting | Before | After | Effect |
-            |---|---|---|---|
-            | vm.swappiness | 60 | **10** | Keeps data in RAM, avoids slow swap |
-            | vm.dirty_ratio | default | **20** | Sane write-back ceiling |
-            | vm.dirty_background_ratio | default | **5** | Earlier background disk flush |
-            | tcp_fastopen | 1 | **3** | Faster connections (client + server) |
-            | tcp_slow_start_after_idle | 1 | **0** | No speed drop after short idle |
-            | tcp_tw_reuse | 0 | **1** | Faster socket recycling |
+            ### extreme-tweaker.kpm — Performance Tweaker v1.1
+
+            Fixes vs v1.0: correct symbol names for Samsung 4.14, dirty_bytes zeroed so dirty_ratio takes effect.
+
+            | Sysctl | Change | Effect |
+            |---|---|---|
+            | vm.swappiness | 160 → **10** | More data in RAM, less swap churn |
+            | vm.dirty_bytes | Samsung default → **0** | Enables ratio-based dirty limits below |
+            | vm.dirty_ratio | 0 → **20** | Write-back ceiling |
+            | vm.dirty_background_ratio | 0 → **5** | Earlier background flush |
+            | tcp_fastopen | 1 → **3** | TFO client + server |
+            | tcp_slow_start_after_idle | 1 → **0** | No speed drop after idle |
+
+            ---
+
+            ### battery-saver.kpm — Battery Saver v1.0
+
+            Reduces CPU + disk wake-ups. **Does NOT touch charging, voltage, or thermals.**
+            Restores original values cleanly on unload.
+
+            | Kernel Variable | Change | Effect |
+            |---|---|---|
+            | dirty_writeback_interval | 500 → **1500 cs** | 3× fewer disk writeback timer wakeups |
+            | dirty_expire_interval | 3000 → **6000 cs** | Pages expire less often, CPU stays idle longer |
+            | laptop_mode | 0 → **5** | Clusters disk I/O so storage stays in low-power state |
+            | sched_energy_aware | * → **1** | EAS: use efficient little cores for light tasks |
+
+            ---
 
             ### How to install
 
             1. Flash **ExtremeKRNL-Nexus-d2s-KPatch** zip via TWRP/OrangeFox
-            2. In KernelSU Manager: install **KPatch-Next-Module** from https://github.com/KernelSU-Next/KPatch-Next-Module
-            3. Open KPatch-Next-Module WebUI → **KPM** tab → **Load** → pick `extreme-tweaker.kpm`
-            4. Reboot — tweaks are live immediately
+            2. In KernelSU Manager → install **KPatch-Next-Module**
+            3. Open KPatch-Next-Module → WebUI → **KPM** tab → **Load**
+            4. Load one or both .kpm files
+            5. Reboot — active on every boot
 
-            > You can reload or unload .kpm files at any time from the WebUI without reflashing.
+            > **Tip:** Load only one at a time to test effects separately.
+            > To unload: KPatch-Next WebUI → KPM tab → tap the module → Unload.
