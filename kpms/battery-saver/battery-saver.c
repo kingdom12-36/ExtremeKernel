@@ -1,36 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * battery-saver.kpm  -  ExtremeKernel Battery Saver
+ * battery-saver.kpm  v1.1  -  ExtremeKernel Battery Saver
  * Samsung Galaxy S20 Ultra (d2s, Exynos 9825), kernel 4.14
  *
  * Safe, purely runtime kernel tunables that reduce CPU/disk wake-ups.
  * All values reset on reboot. Has zero effect if not loaded.
  * Does NOT touch charging current, voltage, or thermal limits.
  *
- * What it tunes:
- *
- * dirty_writeback_interval   500  -> 1500 centisecs
- *   The kernel wakes a writeback thread every 500cs (5s) to flush dirty pages.
- *   Tripling this to 15s means 3x fewer timer wake-ups = 3x less idle wakeup
- *   from disk housekeeping.  Safe: data still flushed before dirty_expire hits.
- *
- * dirty_expire_interval      3000 -> 6000 centisecs
- *   How old a dirty page must be before the kernel considers it expired.
- *   Doubling this lets the CPU stay asleep longer between dirty-page sweeps.
- *   Safe: no data loss risk on modern eMMC/UFS with battery-backed write cache.
- *
- * laptop_mode                0    -> 5
- *   Clusters disk writes together so the storage controller can stay in a low-
- *   power state for longer.  Standard Linux power-saving knob, widely used on
- *   mobile/embedded.  Value 5 is the typical aggressive-but-safe setting.
- *
- * sched_energy_aware         *    -> 1
- *   Energy-Aware Scheduling: the scheduler prefers efficient little cores for
- *   light tasks instead of waking big cores unnecessarily.  Samsung 4.14 EAS
- *   is already partially active; this knob ensures it is fully on.
- *
- * Symbols verified strategy: use kallsyms_lookup_name at runtime, skip
- * gracefully if any symbol is absent (Samsung may rename or remove some).
+ * v1.1: KPatch dynamic loading fix - snprintf resolved at runtime via
+ *       kallsyms_lookup_name to avoid unresolvable UND ELF symbol.
+ *       (KPatch exports snprintf as "kf_snprintf", not "snprintf".)
  */
 
 #include <compiler.h>
@@ -41,7 +20,7 @@
 #include <kallsyms.h>
 
 KPM_NAME("battery-saver");
-KPM_VERSION("1.0.0");
+KPM_VERSION("1.1.0");
 KPM_LICENSE("GPL v2");
 KPM_AUTHOR("ExtremeKernel");
 KPM_DESCRIPTION("Battery-saver: reduce CPU/disk wake-ups for d2s (Exynos 9825)");
@@ -57,9 +36,22 @@ static unsigned int  orig_expire_interval    = 3000;
 static int           orig_laptop_mode        = 0;
 static unsigned int  orig_sched_energy_aware = 0;
 
+/*
+ * snprintf is NOT exported by KPatch under the bare name "snprintf".
+ * KPatch wraps it as kf_snprintf and exports "kf_snprintf".  If the KPM
+ * has a direct UND symbol for "snprintf", simplify_symbols() returns
+ * ENOENT and loading fails.  Resolve it at runtime instead.
+ */
+static int (*kpm_snprintf)(char *buf, size_t size, const char *fmt, ...) = 0;
+
 static long batt_saver_init(const char *args, const char *event, void *__user reserved)
 {
-    pr_info("[ek-battery] Loading ExtremeKernel Battery Saver v1.0...\n");
+    pr_info("[ek-battery] Loading ExtremeKernel Battery Saver v1.1...\n");
+
+    /* Resolve snprintf at runtime - avoids unresolvable UND symbol */
+    kpm_snprintf = (typeof(kpm_snprintf))kallsyms_lookup_name("snprintf");
+    if (!kpm_snprintf)
+        pr_warn("[ek-battery] snprintf not found via kallsyms - ctl0 status disabled\n");
 
     /*
      * Resolve kernel symbols. Names from mm/page-writeback.c (4.14).
@@ -110,17 +102,23 @@ static long batt_saver_ctl0(const char *args, char *__user out_msg, int outlen)
 {
     char buf[512];
     int n = 0;
-    n += snprintf(buf + n, sizeof(buf) - n,
-        "battery-saver v1.0 live values:\n"
-        "  dirty_writeback_interval  = %u cs (orig: %u)\n"
-        "  dirty_expire_interval     = %u cs (orig: %u)\n"
-        "  laptop_mode               = %d (orig: %d)\n"
-        "  sched_energy_aware        = %u (orig: %u)\n",
-        p_writeback_interval ? *p_writeback_interval : 0, orig_writeback_interval,
-        p_expire_interval    ? *p_expire_interval    : 0, orig_expire_interval,
-        p_laptop_mode        ? *p_laptop_mode        : 0, orig_laptop_mode,
-        p_sched_energy_aware ? *p_sched_energy_aware : 0, orig_sched_energy_aware
-    );
+    if (kpm_snprintf) {
+        n += kpm_snprintf(buf + n, sizeof(buf) - n,
+            "battery-saver v1.1 live values:\n"
+            "  dirty_writeback_interval  = %u cs (orig: %u)\n"
+            "  dirty_expire_interval     = %u cs (orig: %u)\n"
+            "  laptop_mode               = %d (orig: %d)\n"
+            "  sched_energy_aware        = %u (orig: %u)\n",
+            p_writeback_interval ? *p_writeback_interval : 0, orig_writeback_interval,
+            p_expire_interval    ? *p_expire_interval    : 0, orig_expire_interval,
+            p_laptop_mode        ? *p_laptop_mode        : 0, orig_laptop_mode,
+            p_sched_energy_aware ? *p_sched_energy_aware : 0, orig_sched_energy_aware
+        );
+    } else {
+        /* snprintf unavailable - return minimal status */
+        buf[0] = 'O'; buf[1] = 'K'; buf[2] = '\n'; buf[3] = '\0';
+        n = 3;
+    }
     compat_copy_to_user(out_msg, buf, n + 1);
     return 0;
 }
