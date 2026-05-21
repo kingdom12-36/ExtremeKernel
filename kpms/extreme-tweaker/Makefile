@@ -20,7 +20,7 @@ extreme-tweaker.kpm: $(objs)
 	$(CC) -r -o $@ $^
 
 %.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDE_FLAGS) -c -O2 -o $@ $<
+	$(CC) $(CFLAGS) $(INCLUDE_FLAGS) -Tkpm.lds -c -O2 -o $@ $<
 
 .PHONY: clean
 clean:
