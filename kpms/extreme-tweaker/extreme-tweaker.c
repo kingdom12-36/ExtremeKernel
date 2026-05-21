@@ -47,6 +47,15 @@ static long tweaker_init(const char *args, const char *event, void *__user reser
     p_tcp_fastopen        = (unsigned int *)kallsyms_lookup_name("sysctl_tcp_fastopen");
     p_tcp_slow_start_idle = (int *)kallsyms_lookup_name("sysctl_tcp_slow_start_after_idle");
 
+    /* Log any symbols that failed to resolve so dmesg makes it obvious */
+    if (!p_swappiness)          pr_err("[ek-tweaker] MISSING: vm_swappiness not in kallsyms\n");
+    if (!p_dirty_ratio)         pr_err("[ek-tweaker] MISSING: vm_dirty_ratio not in kallsyms\n");
+    if (!p_dirty_bg_ratio)      pr_err("[ek-tweaker] MISSING: vm_dirty_background_ratio not in kallsyms\n");
+    if (!p_dirty_bytes)         pr_warn("[ek-tweaker] MISSING: vm_dirty_bytes not in kallsyms (skipping)\n");
+    if (!p_dirty_bg_bytes)      pr_warn("[ek-tweaker] MISSING: vm_dirty_background_bytes not in kallsyms (skipping)\n");
+    if (!p_tcp_fastopen)        pr_err("[ek-tweaker] MISSING: sysctl_tcp_fastopen not in kallsyms\n");
+    if (!p_tcp_slow_start_idle) pr_err("[ek-tweaker] MISSING: sysctl_tcp_slow_start_after_idle not in kallsyms\n");
+
     /* Samsung sets vm_dirty_bytes != 0 which makes vm_dirty_ratio ignored.
      * Zero it out first so our ratio settings actually take effect. */
     if (p_dirty_bytes && *p_dirty_bytes != 0) {
