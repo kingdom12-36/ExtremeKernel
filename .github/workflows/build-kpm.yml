@@ -5,6 +5,7 @@ on:
     paths:
       - kpms/**
       - .github/workflows/build-kpm.yml
+      - kpatch-version
   workflow_dispatch:
 
 jobs:
@@ -16,39 +17,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get latest KPatch-Next version (Strict Matching)
+      - name: Read pinned KPatch-Next version
         id: kpver
         run: |
-          VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+          VER=$(cat kpatch-version | tr -d '[:space:]')
           echo "version=$VER" >> $GITHUB_OUTPUT
-          echo "Using KPatch-Next Stable Version: $VER"
+          echo "Building against pinned KPatch-Next version: $VER"
 
       - name: Download ARM64 cross-compiler
         run: |
           curl -Lo toolchain.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu/12.2.rel1/binrel/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf.tar.xz
           tar -Jxf toolchain.tar.xz
 
-      - name: Clone KPatch-Next (Exact Tag Matching)
+      - name: Clone KPatch-Next (pinned version)
         run: |
-          # نقوم بجلب التاج المستقر المطابق تماماً لما تم حقنه في الكيرنل لمنع الـ Mismatch
           git clone --depth=1 --branch ${{ steps.kpver.outputs.version }} https://github.com/KernelSU-Next/KPatch-Next.git kpatch-next
 
-      - name: Build KPatch Kernel Tools (Generate proper CFLAGS & Headers)
+      - name: Generate KPatch headers
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
           cd kpatch-next/kernel
           make hdr
-          make
-          echo "KPatch Base Environment Ready."
 
       - name: Build extreme-tweaker.kpm
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
           export KP_DIR=$PWD/kpatch-next
-          
-          # حقن الـ Flags لضمان معمارية الـ Kernel الموجهة للهاتف ومنع الـ PIE والـ Floats
           export CFLAGS="-Wall -O2 -mgeneral-regs-only -fno-pic -fno-pie -mcmodel=large -D__KERNEL__"
-          
           cd kpms/extreme-tweaker
           make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR" CFLAGS="$CFLAGS"
           ls -lh extreme-tweaker.kpm
@@ -58,10 +53,7 @@ jobs:
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
           export KP_DIR=$PWD/kpatch-next
-          
-          # تمرير نفس الرايات الصارمة للموديول الثاني
           export CFLAGS="-Wall -O2 -mgeneral-regs-only -fno-pic -fno-pie -mcmodel=large -D__KERNEL__"
-          
           cd kpms/battery-saver
           make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR" CFLAGS="$CFLAGS"
           ls -lh battery-saver.kpm
@@ -90,16 +82,16 @@ jobs:
           body: |
             ## ExtremeKernel KPM Modules
 
-            Built against KPatch-Next ${{ steps.kpver.outputs.version }}.
+            Built against KPatch-Next **${{ steps.kpver.outputs.version }}** (pinned in `kpatch-version`).
             Target: **Samsung Galaxy S20 Ultra (d2s, Exynos 9825, kernel 4.14)**
 
             ---
 
             ### extreme-tweaker.kpm — Performance Tweaker v1.1
-            Fixes vs v1.0: correct symbol names for Samsung 4.14, dirty_bytes zeroed so dirty_ratio takes effect.
+            vm.swappiness → 10, dirty_ratio → 20, tcp_fastopen → 3, tcp_slow_start → 0
 
             ### battery-saver.kpm — Battery Saver v1.0
-            Reduces CPU + disk wake-ups. Does NOT touch charging, voltage, or thermals.
+            Reduces CPU/disk wake-ups. Does NOT touch charging, voltage, or thermals.
 
             ---
 
