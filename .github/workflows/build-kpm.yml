@@ -1,4 +1,4 @@
-Name: Build KPM Modules
+name: Build KPM Modules
 
 on:
   push:
