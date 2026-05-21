@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * extreme-tweaker.kpm  v1.1  ExtremeKernel Performance Tweaker
+ * extreme-tweaker.kpm  v1.2  ExtremeKernel Performance Tweaker
  * Samsung Galaxy S20 Ultra (d2s, Exynos 9825), kernel 4.14
  *
  * Symbol names verified on-device via /proc/kallsyms:
@@ -12,6 +12,10 @@
  *   sysctl_tcp_fastopen              confirmed
  *   sysctl_tcp_slow_start_after_idle confirmed (NOT tcp_slow_start_after_idle)
  *   tcp_tw_reuse                     NOT present on Samsung 4.14 - removed
+ *
+ * v1.2: KPatch dynamic loading fix - snprintf resolved at runtime via
+ *       kallsyms_lookup_name to avoid unresolvable UND ELF symbol.
+ *       (KPatch exports snprintf as "kf_snprintf", not "snprintf".)
  */
 
 #include <compiler.h>
@@ -22,10 +26,10 @@
 #include <kallsyms.h>
 
 KPM_NAME("extreme-tweaker");
-KPM_VERSION("1.1.0");
+KPM_VERSION("1.2.0");
 KPM_LICENSE("GPL v2");
 KPM_AUTHOR("ExtremeKernel");
-KPM_DESCRIPTION("Performance sysctl tweaks for d2s Exynos 9825 - v1.1 corrected symbols");
+KPM_DESCRIPTION("Performance sysctl tweaks for d2s Exynos 9825 - v1.2 dynamic-load fix");
 
 static int           *p_swappiness          = 0;
 static int           *p_dirty_ratio         = 0;
@@ -35,9 +39,22 @@ static unsigned long *p_dirty_bg_bytes      = 0;
 static unsigned int  *p_tcp_fastopen        = 0;
 static int           *p_tcp_slow_start_idle = 0;
 
+/*
+ * snprintf is NOT exported by KPatch under the bare name "snprintf".
+ * KPatch wraps it as kf_snprintf and exports "kf_snprintf".  If the KPM
+ * has a direct UND symbol for "snprintf", simplify_symbols() returns
+ * ENOENT and loading fails.  Resolve it at runtime instead.
+ */
+static int (*kpm_snprintf)(char *buf, size_t size, const char *fmt, ...) = 0;
+
 static long tweaker_init(const char *args, const char *event, void *__user reserved)
 {
-    pr_info("[ek-tweaker] ExtremeKernel Performance Tweaker v1.1 loading...\n");
+    pr_info("[ek-tweaker] ExtremeKernel Performance Tweaker v1.2 loading...\n");
+
+    /* Resolve snprintf at runtime - avoids unresolvable UND symbol */
+    kpm_snprintf = (typeof(kpm_snprintf))kallsyms_lookup_name("snprintf");
+    if (!kpm_snprintf)
+        pr_warn("[ek-tweaker] snprintf not found via kallsyms - ctl0 status disabled\n");
 
     p_swappiness          = (int *)kallsyms_lookup_name("vm_swappiness");
     p_dirty_ratio         = (int *)kallsyms_lookup_name("vm_dirty_ratio");
@@ -96,23 +113,29 @@ static long tweaker_ctl0(const char *args, char *__user out_msg, int outlen)
 {
     char buf[640];
     int n = 0;
-    n += snprintf(buf + n, sizeof(buf) - n,
-        "extreme-tweaker v1.1:\n"
-        "  vm_swappiness              = %d\n"
-        "  vm_dirty_bytes             = %lu\n"
-        "  vm_dirty_background_bytes  = %lu\n"
-        "  vm_dirty_ratio             = %d\n"
-        "  vm_dirty_background_ratio  = %d\n"
-        "  sysctl_tcp_fastopen        = %u\n"
-        "  sysctl_tcp_slow_start      = %d\n",
-        p_swappiness          ? *p_swappiness          : -1,
-        p_dirty_bytes         ? *p_dirty_bytes         :  0,
-        p_dirty_bg_bytes      ? *p_dirty_bg_bytes      :  0,
-        p_dirty_ratio         ? *p_dirty_ratio         : -1,
-        p_dirty_bg_ratio      ? *p_dirty_bg_ratio      : -1,
-        p_tcp_fastopen        ? *p_tcp_fastopen        :  0,
-        p_tcp_slow_start_idle ? *p_tcp_slow_start_idle : -1
-    );
+    if (kpm_snprintf) {
+        n += kpm_snprintf(buf + n, sizeof(buf) - n,
+            "extreme-tweaker v1.2:\n"
+            "  vm_swappiness              = %d\n"
+            "  vm_dirty_bytes             = %lu\n"
+            "  vm_dirty_background_bytes  = %lu\n"
+            "  vm_dirty_ratio             = %d\n"
+            "  vm_dirty_background_ratio  = %d\n"
+            "  sysctl_tcp_fastopen        = %u\n"
+            "  sysctl_tcp_slow_start      = %d\n",
+            p_swappiness          ? *p_swappiness          : -1,
+            p_dirty_bytes         ? *p_dirty_bytes         :  0,
+            p_dirty_bg_bytes      ? *p_dirty_bg_bytes      :  0,
+            p_dirty_ratio         ? *p_dirty_ratio         : -1,
+            p_dirty_bg_ratio      ? *p_dirty_bg_ratio      : -1,
+            p_tcp_fastopen        ? *p_tcp_fastopen        :  0,
+            p_tcp_slow_start_idle ? *p_tcp_slow_start_idle : -1
+        );
+    } else {
+        /* snprintf unavailable - return minimal status */
+        buf[0] = 'O'; buf[1] = 'K'; buf[2] = '\n'; buf[3] = '\0';
+        n = 3;
+    }
     compat_copy_to_user(out_msg, buf, n + 1);
     return 0;
 }
