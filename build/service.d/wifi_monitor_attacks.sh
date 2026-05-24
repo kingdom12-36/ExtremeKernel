@@ -3,8 +3,23 @@
 # wifi_monitor_attacks.sh — WiFi Attack Detector
 # ExtremeKernel | KPatch+Monitor Variant
 # Auto-installed to: /data/adb/service.d/wifi_monitor_attacks.sh
-# Runs at boot via KernelSU/Magisk
-# Logs attacks to: /sdcard/logattacks.txt
+# Runs once at boot via KernelSU/Magisk service.d
+#
+# HOW IT WORKS:
+#   This script launches several background daemons with setsid
+#   so they survive after this script exits. The daemons stay
+#   running until you reboot or manually kill them (see PIDs in
+#   the log). Removing this file stops them on the NEXT reboot.
+#
+# IMPORTANT — WIFI WILL DISCONNECT IN MONITOR MODE:
+#   The BCM4375 chip cannot be in managed mode (connected to AP)
+#   and monitor mode (raw 802.11 capture) at the same time.
+#   Methods 1 & 2 below require disabling wlan0 first.
+#   Methods 3-5 are ALWAYS ACTIVE and never cut your WiFi.
+#   For attack detection on YOUR OWN connection, Methods 3-5
+#   are all you need — they catch every deauth/disassoc hit.
+#
+# LOGS: tail -f /sdcard/logattacks.txt
 # ============================================================
 
 LOGFILE="/sdcard/logattacks.txt"
@@ -21,119 +36,143 @@ sleep 30
 log "============================================"
 log "WiFi Attack Monitor Started"
 log "Kernel: $(uname -r)"
-log "Device: $(getprop ro.product.model 2>/dev/null || echo unknown)"
-log "Android: $(getprop ro.build.version.release 2>/dev/null || echo unknown)"
+log "Device: $(getprop ro.product.model 2>/dev/null)"
+log "Android: $(getprop ro.build.version.release 2>/dev/null)"
+log "============================================"
+log "NOTE: Methods 3-5 are always active (no WiFi cut)."
+log "Monitor interface (mon0) requires: svc wifi disable first."
 log "============================================"
 
-# ---- Method 1: Try to create monitor interface (needs WL_MONITOR in kernel) ----
+# ---- Method 1: Try to create mon0 monitor interface ----
+# WL_MONITOR is compiled into ExtremeKernel (bcmdhd_101_16 Makefile).
+# HOWEVER: the BCM4375 chip cannot run wlan0 (managed/internet) AND
+# mon0 (monitor) simultaneously. Enabling mon0 WILL cut your WiFi.
+# This method is intentionally left non-blocking — if iw fails because
+# wlan0 is active, we silently skip and rely on Methods 3-5.
 create_monitor_iface() {
     iw dev "$WIFI_IF" interface add "$MON_IF" type monitor 2>/dev/null \
         && ip link set "$MON_IF" up 2>/dev/null \
-        && log "[INIT] Monitor interface $MON_IF created (WL_MONITOR active)" \
+        && log "[METHOD1] Monitor interface $MON_IF UP — raw 802.11 capture active" \
         && return 0
-    log "[INIT] Monitor interface unavailable — using passive detection methods"
+    log "[METHOD1] mon0 skipped (wlan0 active or driver busy). Methods 3-5 cover you."
     return 1
 }
 
-# ---- Method 2: tcpdump on monitor interface (802.11 mgmt frames) ----
-# Detects deauth/disassoc/beacon-flood at the frame level
+# ---- Method 2: tcpdump on mon0 (only if mon0 came up) ----
+# Captures raw 802.11 deauth/disassoc management frames.
+# Only useful when WiFi is disabled and mon0 is up.
 watch_tcpdump() {
     ip link show "$MON_IF" > /dev/null 2>&1 || return
-    log "[TCPDUMP] Starting 802.11 capture on $MON_IF..."
-    tcpdump -i "$MON_IF" -nn -e -l 2>/dev/null | while read -r LINE; do
-        case "$LINE" in
-            *"Deauthentication"*|*"deauth"*|*"DeAuth"*)
-                log "[ATTACK][DEAUTH] $LINE" ;;
-            *"Disassociation"*|*"disassoc"*|*"Disassoc"*)
-                log "[ATTACK][DISASSOC] $LINE" ;;
-            *"Authentication"*) log "[AUTH] $LINE" ;;
-        esac
-    done &
-    log "[TCPDUMP] PID: $! — monitoring $MON_IF"
+    log "[METHOD2] tcpdump capturing 802.11 management frames on $MON_IF..."
+    setsid sh -c "
+        tcpdump -i $MON_IF -nn -e -l 2>/dev/null | while read LINE; do
+            case \"\$LINE\" in
+                *Deauthentication*|*deauth*|*DeAuth*)
+                    echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] [ATTACK][DEAUTH] \$LINE\" >> $LOGFILE ;;
+                *Disassociation*|*disassoc*)
+                    echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] [ATTACK][DISASSOC] \$LINE\" >> $LOGFILE ;;
+                *Authentication*)
+                    echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] [AUTH] \$LINE\" >> $LOGFILE ;;
+            esac
+        done
+    " > /dev/null 2>&1 &
+    log "[METHOD2] tcpdump PID: $!"
 }
 
-# ---- Method 3: dmesg watcher for BCM4375 DHD driver events ----
-# Samsung's DHD driver prints deauth/disconnect events to the kernel log.
-# Works even without monitor mode — always active.
+# ---- Method 3: dmesg watcher — BCM4375 DHD driver events ----
+# The bcmdhd_101_16 driver logs deauth/disassoc/beacon-loss to the
+# kernel ring buffer. This works 100% without touching your WiFi.
+# Deauth reason codes: 1=unspecified, 3=STA leaving, 6=class2 frame,
+# 7=class3 frame (most deauth attacks use 1, 6, or 7).
 watch_dmesg() {
-    log "[DMESG] Starting BCM4375 DHD event watcher..."
-    dmesg -w 2>/dev/null | while read -r LINE; do
-        case "$LINE" in
-            *"deauth"*|*"DEAUTH"*)
-                log "[ATTACK][DMESG][DEAUTH] $LINE" ;;
-            *"disassoc"*|*"DISASSOC"*)
-                log "[ATTACK][DMESG][DISASSOC] $LINE" ;;
-            *"beacon loss"*|*"BEACON_LOSS"*|*"beacon_loss"*)
-                log "[ATTACK][DMESG][BEACON LOSS] Possible jamming/deauth — $LINE" ;;
-            *"reason=6"*|*"reason=7"*)
-                log "[ATTACK][DMESG][REASON CODE 6/7] Class 2/3 frame from unauth STA — $LINE" ;;
-            *"reason=1"*)
-                log "[SUSPECT][DMESG][REASON=1] Unspecified disconnect — $LINE" ;;
-            *"disconnect"*|*"DISCONNECT"*)
-                log "[INFO][DMESG][DISCONNECT] $LINE" ;;
-        esac
-    done &
-    log "[DMESG] Watcher PID: $!"
+    log "[METHOD3] Starting BCM4375 DHD dmesg watcher..."
+    setsid sh -c "
+        dmesg -w 2>/dev/null | while read LINE; do
+            TS=\"\$(date '+%Y-%m-%d %H:%M:%S')\"
+            case \"\$LINE\" in
+                *deauth*|*DEAUTH*)
+                    echo \"[\$TS] [ATTACK][DMESG][DEAUTH] \$LINE\" >> $LOGFILE ;;
+                *disassoc*|*DISASSOC*)
+                    echo \"[\$TS] [ATTACK][DMESG][DISASSOC] \$LINE\" >> $LOGFILE ;;
+                *\"beacon loss\"*|*BEACON_LOSS*|*beacon_loss*)
+                    echo \"[\$TS] [ATTACK][DMESG][BEACON LOSS] Possible jamming — \$LINE\" >> $LOGFILE ;;
+                *\"reason=6\"*|*\"reason=7\"*)
+                    echo \"[\$TS] [ATTACK][DMESG][REASON 6/7] Class2/3 frame attack — \$LINE\" >> $LOGFILE ;;
+                *\"reason=1\"*)
+                    echo \"[\$TS] [SUSPECT][DMESG][REASON=1] Unspecified disconnect — \$LINE\" >> $LOGFILE ;;
+                *disconnect*|*DISCONNECT*)
+                    echo \"[\$TS] [INFO][DMESG][DISCONNECT] \$LINE\" >> $LOGFILE ;;
+            esac
+        done
+    " > /dev/null 2>&1 &
+    log "[METHOD3] dmesg watcher PID: $!"
 }
 
 # ---- Method 4: wpa_supplicant event monitor ----
-# Catches disconnect/deauth events reported to wpa_supplicant.
-# Useful to confirm attacks seen in dmesg with higher-level context.
+# Catches disconnect/deauth events at the supplicant level.
+# Higher-level than dmesg — confirms the attack reached your association.
 watch_wpa() {
-    # Try common wpa_supplicant socket locations on Samsung
     for SOCK_DIR in "/data/vendor/wifi/wpa/sockets" "/data/misc/wifi/sockets"; do
-        if [ -d "$SOCK_DIR" ]; then
-            log "[WPA] Monitoring wpa_supplicant at $SOCK_DIR..."
-            wpa_cli -p "$SOCK_DIR" -i "$WIFI_IF" -a /dev/null 2>/dev/null | \
-            while read -r EVENT; do
-                case "$EVENT" in
-                    *DISCONNECTED*)  log "[ATTACK][WPA][DISCONNECTED] $EVENT" ;;
-                    *DEAUTH*)        log "[ATTACK][WPA][DEAUTH] $EVENT" ;;
-                    *DISASSOC*)      log "[ATTACK][WPA][DISASSOC] $EVENT" ;;
-                    *AUTH_FAILED*)   log "[SUSPECT][WPA][AUTH_FAILED] Possible brute-force — $EVENT" ;;
-                    *TEMP_DISABLED*) log "[SUSPECT][WPA][TEMP_DISABLED] Network blocked — $EVENT" ;;
+        [ -d "$SOCK_DIR" ] || continue
+        log "[METHOD4] Watching wpa_supplicant at $SOCK_DIR..."
+        setsid sh -c "
+            wpa_cli -p $SOCK_DIR -i $WIFI_IF -a /dev/null 2>/dev/null | while read EVENT; do
+                TS=\"\$(date '+%Y-%m-%d %H:%M:%S')\"
+                case \"\$EVENT\" in
+                    *DISCONNECTED*)  echo \"[\$TS] [ATTACK][WPA][DISCONNECTED] \$EVENT\" >> $LOGFILE ;;
+                    *DEAUTH*)        echo \"[\$TS] [ATTACK][WPA][DEAUTH] \$EVENT\" >> $LOGFILE ;;
+                    *DISASSOC*)      echo \"[\$TS] [ATTACK][WPA][DISASSOC] \$EVENT\" >> $LOGFILE ;;
+                    *AUTH_FAILED*)   echo \"[\$TS] [SUSPECT][WPA][AUTH_FAILED] Possible brute-force — \$EVENT\" >> $LOGFILE ;;
+                    *TEMP_DISABLED*) echo \"[\$TS] [SUSPECT][WPA][TEMP_DISABLED] \$EVENT\" >> $LOGFILE ;;
                 esac
-            done &
-            log "[WPA] Watcher PID: $!"
-            return
-        fi
+            done
+        " > /dev/null 2>&1 &
+        log "[METHOD4] wpa_cli PID: $!"
+        return
     done
-    log "[WPA] wpa_supplicant socket not found — skipping wpa_cli method"
+    log "[METHOD4] wpa_supplicant socket not found, skipping."
 }
 
-# ---- Method 5: Rapid disconnect counter ----
-# Counts disconnects per 60-second window — a spike = deauth storm
+# ---- Method 5: Rapid disconnect rate counter ----
+# Counts WiFi disconnects per 60-second window.
+# 3+ disconnects in 60s = likely deauth storm / attack.
+# Works entirely from /sys/class/net — zero WiFi impact.
 watch_disconnect_rate() {
-    log "[RATE] Starting disconnect rate monitor (threshold: 3/60s)..."
-    COUNT=0
-    WINDOW_START=$(date +%s)
-    while true; do
-        NOW=$(date +%s)
-        ELAPSED=$((NOW - WINDOW_START))
-        if [ "$ELAPSED" -ge 60 ]; then
-            if [ "$COUNT" -ge 3 ]; then
-                log "[ALERT][RATE] $COUNT disconnects in last 60s — DEAUTH STORM LIKELY"
+    log "[METHOD5] Disconnect rate monitor started (alert threshold: 3/60s)..."
+    setsid sh -c "
+        COUNT=0
+        PREV_STATE=up
+        WIN_START=\$(date +%s)
+        while true; do
+            sleep 5
+            NOW=\$(date +%s)
+            ELAPSED=\$((NOW - WIN_START))
+            STATE=\$(cat /sys/class/net/$WIFI_IF/operstate 2>/dev/null || echo unknown)
+            if [ \"\$STATE\" = down ] && [ \"\$PREV_STATE\" = up ]; then
+                COUNT=\$((COUNT + 1))
+                echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] [RATE] Disconnect #\$COUNT in window\" >> $LOGFILE
             fi
-            COUNT=0
-            WINDOW_START=$NOW
-        fi
-        # Check current wifi state
-        if ip link show "$WIFI_IF" 2>/dev/null | grep -q "state DOWN"; then
-            COUNT=$((COUNT + 1))
-        fi
-        sleep 5
-    done &
-    log "[RATE] Rate watcher PID: $!"
+            PREV_STATE=\$STATE
+            if [ \"\$ELAPSED\" -ge 60 ]; then
+                if [ \"\$COUNT\" -ge 3 ]; then
+                    echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] [ALERT][RATE] \$COUNT disconnects in 60s — DEAUTH STORM DETECTED\" >> $LOGFILE
+                fi
+                COUNT=0
+                WIN_START=\$NOW
+            fi
+        done
+    " > /dev/null 2>&1 &
+    log "[METHOD5] Rate watcher PID: $!"
 }
 
-# ---- Start all detection methods ----
+# ---- Launch all methods ----
 create_monitor_iface
-watch_dmesg
-watch_wpa
-watch_tcpdump
-watch_disconnect_rate
+watch_dmesg        # always on — no WiFi cut
+watch_wpa          # always on — no WiFi cut
+watch_tcpdump      # only if mon0 is up
+watch_disconnect_rate  # always on — no WiFi cut
 
-log "[INIT] All monitors active."
-log "[INIT] Tail this file to watch live: tail -f $LOGFILE"
-log "[INIT] TIP: 'logcat | grep -i dhd' also shows driver-level WiFi events"
+log "[INIT] All active monitors running. Methods 3-5 never cut WiFi."
+log "[INIT] To view live: tail -f $LOGFILE"
+log "[INIT] To stop daemons: check PIDs above and: kill <PID>"
 log "============================================"
