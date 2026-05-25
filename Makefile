@@ -756,7 +756,9 @@ KBUILD_CFLAGS	+= -mllvm -polly \
 		   -mllvm -polly-ast-use-context \
 		   -mllvm -polly-invariant-load-hoisting \
 		   -mllvm -polly-run-inliner \
-		   -mllvm -polly-vectorizer=stripmine
+		   -mllvm -polly-vectorizer=stripmine \
+		   -mllvm -polly-opt-fusion=max \
+		   -mllvm -polly-detect-keep-going
 # Polly may optimise loops with dead paths beyound what the linker
 # # can understand. This may negate the effect of the linker's DCE
 # # so we tell Polly to perfom proven DCE on the loops it optimises
