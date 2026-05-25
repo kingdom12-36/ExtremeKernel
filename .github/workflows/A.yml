@@ -29,7 +29,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchain/neutron_18
-          key: neutron-clang-18-05012024
+          key: neutron-clang-18-05012024-v2
 
       - name: Cache ccache objects
         uses: actions/cache@v4
@@ -43,31 +43,28 @@ jobs:
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
-      - name: Verify and patch Neutron Clang 18 toolchain
+      - name: Setup Neutron Clang 18 toolchain
         run: |
           CLANG_DIR=toolchain/neutron_18
-          # Download if missing
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
-            echo "Toolchain missing — downloading Neutron Clang 18..."
+            echo "Toolchain not in cache — downloading Neutron Clang 18..."
             rm -rf "$CLANG_DIR"
             mkdir -p "$CLANG_DIR"
             pushd "$CLANG_DIR"
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
+            echo "Applying glibc compatibility patch..."
+            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
             popd
+            echo "Toolchain downloaded and patched."
+          else
+            echo "Toolchain restored from cache."
           fi
-          # Always re-apply glibc patch — the cached toolchain may have been saved
-          # before patching, and the runner glibc may differ between runs.
-          # antman --patch=glibc is idempotent (uses patchelf, safe to run twice).
-          echo "Applying glibc patch (idempotent)..."
-          pushd "$CLANG_DIR"
-          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
-          popd
           # Ensure 'clang' symlink exists alongside clang-18
           if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
             echo "Creating clang -> clang-18 symlink"
             ln -sf clang-18 "$CLANG_DIR/bin/clang"
           fi
-          echo "Toolchain OK: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
+          echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
 
       - name: Sync submodules (deterministic + full history)
         run: |
