@@ -319,3 +319,64 @@ source "fs/dlm/Kconfig"
 source "fs/unicode/Kconfig"
 
 endmenu
+
+menu "SUSFS - SU Stealth File System"
+
+config KSU_SUSFS
+	bool "Enable SUSFS for KernelSU"
+	default n
+	help
+	  Enable SUSFS (SU Stealth File System) v2.1.0 support.
+	  Hides KernelSU from detection by apps and integrity checks.
+
+config KSU_SUSFS_SUS_PATH
+	bool "SUSFS: Hide suspicious paths"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_SUS_MOUNT
+	bool "SUSFS: Hide suspicious mounts"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_SUS_KSTAT
+	bool "SUSFS: Spoof file kstat"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_TRY_UMOUNT
+	bool "SUSFS: Try umount for isolated processes"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_SPOOF_UNAME
+	bool "SUSFS: Spoof uname"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_ENABLE_LOG
+	bool "SUSFS: Enable logging"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+	bool "SUSFS: Hide KSU/SUSFS symbols from kallsyms"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	bool "SUSFS: Spoof /proc/cmdline or bootconfig"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_OPEN_REDIRECT
+	bool "SUSFS: Open redirect"
+	depends on KSU_SUSFS
+	default y
+
+config KSU_SUSFS_SUS_MAP
+	bool "SUSFS: Sus map (AS_FLAGS_SUS_MAP)"
+	depends on KSU_SUSFS
+	default y
+
+endmenu
