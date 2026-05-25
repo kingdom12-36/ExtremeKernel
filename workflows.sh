@@ -195,12 +195,13 @@ KCFLAGS_EXTRA="-O3"
 KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
 KCFLAGS_EXTRA+=" -mtune=cortex-a75"
 KCFLAGS_EXTRA+=" -fno-semantic-interposition"
+# Polly probe: only add -mllvm -polly (the base flag that enables the optimizer).
+# Sub-options like -polly-ast-detect-max-depth and -polly-run-dce may not exist
+# in Polly 18 and would cause clang to fail on EVERY cc-option() capability test
+# (Makefile:1047 puts KCFLAGS into KBUILD_CFLAGS which feeds CC_OPTION_CFLAGS).
 if echo "int f(void){return 0;}" | clang -mllvm -polly -c -x c - -o /dev/null 2>/dev/null; then
-  echo "Polly available — enabling polyhedral optimizer"
+  echo "Polly available — enabling polyhedral loop optimizer"
   KCFLAGS_EXTRA+=" -mllvm -polly"
-  KCFLAGS_EXTRA+=" -mllvm -polly-ast-detect-max-depth=8"
-  KCFLAGS_EXTRA+=" -mllvm -polly-enable-delicm=true"
-  KCFLAGS_EXTRA+=" -mllvm -polly-run-dce=true"
 else
   echo "Polly not available in this toolchain — skipping"
 fi
