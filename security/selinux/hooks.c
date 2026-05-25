@@ -28,6 +28,9 @@
 #include <linux/kd.h>
 #include <linux/kernel.h>
 #include <linux/tracehook.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#endif
 #include <linux/errno.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
@@ -3244,6 +3247,12 @@ static noinline int audit_inode_permission(struct inode *inode,
 	struct common_audit_data ad;
 	struct inode_security_struct *isec = inode->i_security;
 	int rc;
+
+
+#ifdef CONFIG_KSU_SUSFS
+	if (READ_ONCE(susfs_is_avc_log_spoofing_enabled))
+		return 0;
+#endif
 
 	ad.type = LSM_AUDIT_DATA_INODE;
 	ad.u.inode = inode;
