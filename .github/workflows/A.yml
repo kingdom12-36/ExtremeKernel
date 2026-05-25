@@ -15,7 +15,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           submodules: recursive
           token: ${{ github.token }}
 
@@ -24,6 +24,24 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y git-core gnupg flex bison build-essential zip curl \
             zlib1g-dev libc6-dev-i386 libxml2-utils xsltproc unzip fontconfig
+
+      - name: Cache Neutron Clang 18 toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain/neutron_18
+          key: neutron-clang-18-05012024
+
+      - name: Cache ccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-d2s-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-d2s-${{ github.ref_name }}-
+            ccache-d2s-
+
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
 
       - name: Sync submodules (deterministic)
         run: |
@@ -58,6 +76,11 @@ jobs:
           echo "===================="
 
       - name: Build d2s kernel
+        env:
+          USE_CCACHE: "1"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: "5G"
+          CCACHE_COMPRESS: "1"
         run: |
           chmod +x ./workflows.sh
           ./workflows.sh -m d2s -k Y -r N
