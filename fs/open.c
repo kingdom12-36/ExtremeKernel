@@ -9,6 +9,10 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/fsnotify.h>
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+#include <linux/susfs.h>
+extern struct filename *susfs_open_redirect_spoof_do_sys_openat(struct inode *inode);
+#endif
 #include <linux/module.h>
 #include <linux/tty.h>
 #include <linux/namei.h>
@@ -1103,6 +1107,16 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 	fd = get_unused_fd_flags(flags);
 	if (fd >= 0) {
 		struct file *f = do_filp_open(dfd, tmp, &op);
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+		if (!IS_ERR(f)) {
+			struct filename *redirected = susfs_open_redirect_spoof_do_sys_openat(f->f_inode);
+			if (redirected && !IS_ERR(redirected)) {
+				fput(f);
+				f = do_filp_open(dfd, redirected, &op);
+				putname(redirected);
+			}
+		}
+#endif
 #ifdef CONFIG_SECURITY_DEFEX
 		if (!IS_ERR(f) && task_defex_enforce(current, f, -__NR_openat)) {
 			fput(f);
