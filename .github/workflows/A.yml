@@ -46,8 +46,8 @@ jobs:
       - name: Sync submodules (deterministic)
         run: |
           git submodule sync --recursive
-          # تم إبقاء التعديل هنا وحذف الخطوة المكررة التي كانت تليه
-          git submodule update --init --recursive --force --no-shallow
+          # استخدام العلم الصحيح لمنع الجيت من فرض الـ shallow clone
+          git submodule update --init --recursive --force --no-recommend-shallow
 
       - name: Kernel fingerprint (stable)
         run: |
