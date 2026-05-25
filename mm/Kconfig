@@ -781,6 +781,14 @@ config MAX_DIRTY_THRESH_PAGES
 	  It is only effective when dirty_ratio is used.
 	  (Setting dirty_bytes disables this option.)
 
+config VM_MAX_READAHEAD_KB
+	int "Default max readahead window size in Kilobytes"
+	default 128
+	help
+	  Sets the VM_MAX_READAHEAD value to allow the readahead window to grow
+	  to a maximum size of the configured value. Increasing this benefits
+	  sequential read throughput (e.g. 512 = 512 KB window).
+
 config INCREASE_MAXIMUM_SWAPPINESS
 	bool "Allow swappiness to be set up to 200"
 	depends on SWAP
