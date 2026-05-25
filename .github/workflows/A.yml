@@ -1,4 +1,4 @@
-Name: ExtremeKernel d2s Build (stable + correct fingerprint)
+name: ExtremeKernel d2s Build (stable + correct fingerprint)
 
 on:
   push:
