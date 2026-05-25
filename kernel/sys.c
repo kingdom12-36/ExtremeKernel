@@ -46,6 +46,11 @@
 #include <linux/mempolicy.h>
 
 #include <linux/compat.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs_def.h>
+extern void susfs_prctl_dispatch(unsigned long cmd, unsigned long __user *arg);
+#endif
+
 #include <linux/syscalls.h>
 #include <linux/kprobes.h>
 #include <linux/user_namespace.h>
@@ -2400,6 +2405,15 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		return error;
 
 	error = 0;
+
+#ifdef CONFIG_KSU_SUSFS
+	if ((unsigned int)option == SUSFS_MAGIC) {
+		if (!uid_eq(current_uid(), GLOBAL_ROOT_UID))
+			return -EPERM;
+		susfs_prctl_dispatch(arg2, (unsigned long __user *)arg3);
+		return 0;
+	}
+#endif
 	switch (option) {
 	case PR_SET_PDEATHSIG:
 		if (!valid_signal(arg2)) {
