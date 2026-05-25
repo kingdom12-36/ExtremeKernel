@@ -43,11 +43,32 @@ jobs:
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
-      - name: Sync submodules (deterministic)
+      - name: Verify Neutron Clang 18 toolchain
+        run: |
+          CLANG_DIR=toolchain/neutron_18
+          if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
+            echo "Toolchain missing or incomplete — downloading Neutron Clang 18..."
+            rm -rf "$CLANG_DIR"
+            mkdir -p "$CLANG_DIR"
+            pushd "$CLANG_DIR"
+            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
+            echo "Patching toolchain for glibc compatibility..."
+            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+            popd
+          fi
+          # Ensure 'clang' symlink exists alongside clang-18 (required for LLVM=1 host builds)
+          if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
+            echo "Creating clang -> clang-18 symlink"
+            ln -sf clang-18 "$CLANG_DIR/bin/clang"
+          fi
+          echo "Toolchain OK: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
+
+      - name: Sync submodules (deterministic + full history)
         run: |
           git submodule sync --recursive
-          # استخدام العلم الصحيح لمنع الجيت من فرض الـ shallow clone
           git submodule update --init --recursive --force --no-recommend-shallow
+          # Unshallow KernelSU-Next so rev-list --count gives the real commit count
+          git -C KernelSU-Next fetch --unshallow origin 2>/dev/null || true
 
       - name: Kernel fingerprint (stable)
         run: |
@@ -57,7 +78,7 @@ jobs:
         run: |
           cd KernelSU-Next
           git fetch --unshallow || true
-          
+
           echo "KSU_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
           COUNT=$(git rev-list --count HEAD)
