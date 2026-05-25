@@ -172,6 +172,28 @@ fi
 
 echo "-----------------------------------------------"
 echo "Building kernel using "$KERNEL_DEFCONFIG""
+# ── Advanced compiler optimizations ─────────────────────────────────────
+# -O3              : overrides kernel default -O2; aggressive inlining + vectorization
+# -march=armv8.2-a : Exynos 9825 = Cortex-A75+A55, both ARMv8.2-A capable
+# +crypto+crc      : hardware AES/SHA and CRC32 (always present on this SoC)
+# -mtune=cortex-a75: instruction scheduling tuned for the big core
+# -fno-semantic-interposition: cross-TU inlining without LTO compile-time cost
+# Polly            : polyhedral loop optimizer — auto-tiles, vectorizes, and
+#                   rewrites loops for cache locality. Build time 2-4x slower.
+KCFLAGS_EXTRA="-O3"
+KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
+KCFLAGS_EXTRA+=" -mtune=cortex-a75"
+KCFLAGS_EXTRA+=" -fno-semantic-interposition"
+KCFLAGS_EXTRA+=" -mllvm -polly"
+KCFLAGS_EXTRA+=" -mllvm -polly-ast-detect-max-depth=8"
+KCFLAGS_EXTRA+=" -mllvm -polly-enable-delicm=true"
+KCFLAGS_EXTRA+=" -mllvm -polly-run-dce=true"
+MAKE_FLAGS+=("KCFLAGS=${KCFLAGS_EXTRA}")
+
+echo "-----------------------------------------------"
+echo "Advanced flags: ${KCFLAGS_EXTRA}"
+echo "-----------------------------------------------"
+
 echo "Generating configuration file..."
 echo "-----------------------------------------------"
 make "${MAKE_FLAGS[@]}" -j$CORES exynos9820_defconfig $MODEL.config $KSU $RECOVERY || abort
