@@ -79,7 +79,16 @@ MAKE_FLAGS=(
 if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
   echo "ccache enabled — dir: ${CCACHE_DIR:-~/.ccache}"
   ccache --zero-stats 2>/dev/null || true
-  MAKE_FLAGS+=(CC="ccache clang" CXX="ccache clang++")
+    # Use PATH-level wrapper scripts instead of CC= make var.
+  # CC="ccache clang" as a Makefile variable breaks prepare-compiler-check.
+  mkdir -p /tmp/ccwrap
+  for _b in clang clang++ clang-18; do
+    [ -f "$CLANG_DIR/bin/$_b" ] || continue
+    printf '#!/bin/sh\nexec ccache "%s" "$@"\n' "$CLANG_DIR/bin/$_b" > "/tmp/ccwrap/$_b"
+    chmod +x "/tmp/ccwrap/$_b"
+  done
+  export PATH="/tmp/ccwrap:$PATH"
+  echo "ccache wrappers: $(ls /tmp/ccwrap)"
 fi
 
 # Define specific variables
@@ -184,10 +193,15 @@ KCFLAGS_EXTRA="-O3"
 KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
 KCFLAGS_EXTRA+=" -mtune=cortex-a75"
 KCFLAGS_EXTRA+=" -fno-semantic-interposition"
-KCFLAGS_EXTRA+=" -mllvm -polly"
-KCFLAGS_EXTRA+=" -mllvm -polly-ast-detect-max-depth=8"
-KCFLAGS_EXTRA+=" -mllvm -polly-enable-delicm=true"
-KCFLAGS_EXTRA+=" -mllvm -polly-run-dce=true"
+if echo "int f(void){return 0;}" | clang -mllvm -polly -c -x c - -o /dev/null 2>/dev/null; then
+  echo "Polly available — enabling polyhedral optimizer"
+  KCFLAGS_EXTRA+=" -mllvm -polly"
+  KCFLAGS_EXTRA+=" -mllvm -polly-ast-detect-max-depth=8"
+  KCFLAGS_EXTRA+=" -mllvm -polly-enable-delicm=true"
+  KCFLAGS_EXTRA+=" -mllvm -polly-run-dce=true"
+else
+  echo "Polly not available in this toolchain — skipping"
+fi
 MAKE_FLAGS+=("KCFLAGS=${KCFLAGS_EXTRA}")
 
 echo "-----------------------------------------------"
