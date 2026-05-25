@@ -1,4 +1,4 @@
-name: ExtremeKernel d2s Build (stable + correct fingerprint)
+Name: ExtremeKernel d2s Build (stable + correct fingerprint)
 
 on:
   push:
@@ -46,22 +46,16 @@ jobs:
       - name: Sync submodules (deterministic)
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --force
+          # تم إبقاء التعديل هنا وحذف الخطوة المكررة التي كانت تليه
+          git submodule update --init --recursive --force --no-shallow
 
       - name: Kernel fingerprint (stable)
         run: |
           echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-      - name: Sync submodules (deterministic)
-        run: |
-          git submodule sync --recursive
-          # إجبار السحب على جلب التاريخ كاملاً للـ submodules دون تقييد الـ depth
-          git submodule update --init --recursive --force --no-shallow
-
       - name: KernelSU fingerprint + version
         run: |
           cd KernelSU-Next
-          # للتأكد من أن المستودع الفرعي يملك كل التواريخ لحساب الرقم بشكل صحيح
           git fetch --unshallow || true
           
           echo "KSU_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
@@ -70,8 +64,10 @@ jobs:
           VERSION=$((30000 + COUNT + 150))
 
           echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
+
           echo "KernelSU commit: $(git rev-parse HEAD)"
           echo "KernelSU version: $VERSION"
+
           cd ..
 
       - name: Show fingerprint summary
