@@ -68,6 +68,13 @@ if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
     popd > /dev/null
 fi
 
+# Ensure 'clang' binary/symlink exists alongside clang-18
+# (required for LLVM=1 host builds via ccache wrappers)
+if [ -f "$CLANG_DIR/bin/clang-18" ] && [ ! -e "$CLANG_DIR/bin/clang" ]; then
+    ln -sf clang-18 "$CLANG_DIR/bin/clang"
+    echo "Created clang -> clang-18 symlink"
+fi
+
 MAKE_FLAGS=(
   LLVM=1
   LLVM_IAS=1
@@ -85,7 +92,7 @@ if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
   _CLANG_ABS="$(cd "$CLANG_DIR" && pwd)"
   mkdir -p /tmp/ccwrap
   for _b in clang clang++ clang-18; do
-    [ -f "$_CLANG_ABS/bin/$_b" ] || continue
+    [ -e "$_CLANG_ABS/bin/$_b" ] || continue
     printf '#!/bin/sh\nexec ccache "%s" "$@"\n' "$_CLANG_ABS/bin/$_b" > "/tmp/ccwrap/$_b"
     chmod +x "/tmp/ccwrap/$_b"
   done
