@@ -43,20 +43,26 @@ jobs:
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
-      - name: Verify Neutron Clang 18 toolchain
+      - name: Verify and patch Neutron Clang 18 toolchain
         run: |
           CLANG_DIR=toolchain/neutron_18
+          # Download if missing
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
-            echo "Toolchain missing or incomplete — downloading Neutron Clang 18..."
+            echo "Toolchain missing — downloading Neutron Clang 18..."
             rm -rf "$CLANG_DIR"
             mkdir -p "$CLANG_DIR"
             pushd "$CLANG_DIR"
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
-            echo "Patching toolchain for glibc compatibility..."
-            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
             popd
           fi
-          # Ensure 'clang' symlink exists alongside clang-18 (required for LLVM=1 host builds)
+          # Always re-apply glibc patch — the cached toolchain may have been saved
+          # before patching, and the runner glibc may differ between runs.
+          # antman --patch=glibc is idempotent (uses patchelf, safe to run twice).
+          echo "Applying glibc patch (idempotent)..."
+          pushd "$CLANG_DIR"
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+          popd
+          # Ensure 'clang' symlink exists alongside clang-18
           if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
             echo "Creating clang -> clang-18 symlink"
             ln -sf clang-18 "$CLANG_DIR/bin/clang"
