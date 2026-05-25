@@ -61,6 +61,9 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
 #include <linux/compat.h>
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+#include <linux/susfs.h>
+#endif
 #include <linux/vmalloc.h>
 #include <linux/task_integrity.h>
 
@@ -1476,6 +1479,12 @@ void install_exec_creds(struct linux_binprm *bprm)
 	 * credentials; any time after this it may be unlocked.
 	 */
 	security_bprm_committed_creds(bprm);
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+	/* umount SUSFS-configured paths for non-root processes after exec */
+	if (!uid_eq(current_uid(), GLOBAL_ROOT_UID))
+		susfs_try_umount(current_uid().val);
+#endif
+
 	mutex_unlock(&current->signal->cred_guard_mutex);
 }
 EXPORT_SYMBOL(install_exec_creds);
