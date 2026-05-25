@@ -561,8 +561,7 @@ static void __init report_meminit(void)
 		stack = "off";
 
 	pr_info("mem auto-init: stack:%s, heap alloc:%s, heap free:%s\n",
-		stack, want_init_on_alloc(GFP_KERNEL) ? "on" : "off",
-		want_init_on_free() ? "on" : "off");
+		stack, want_init_on_alloc(GFP_KERNEL) ? "on" : "off",\n		want_init_on_free() ? "on" : "off");
 	if (want_init_on_free())
 		pr_info("mem auto-init: clearing system memory may take some time...\n");
 }
@@ -614,40 +613,23 @@ asmlinkage __visible void __init start_kernel(void)
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	/* ExtremeKernel boot banner */
-	pr_info("
-");
-	pr_info("  ███████╗██╗  ██╗████████╗██████╗ ███████╗███╗   ███╗███████╗
-");
-	pr_info("  ██╔════╝╚██╗██╔╝╚══██╔══╝██╔══██╗██╔════╝████╗ ████║██╔════╝
-");
-	pr_info("  █████╗   ╚███╔╝    ██║   ██████╔╝█████╗  ██╔████╔██║█████╗  
-");
-	pr_info("  ██╔══╝   ██╔██╗    ██║   ██╔══██╗██╔══╝  ██║╚██╔╝██║██╔══╝  
-");
-	pr_info("  ███████╗██╔╝ ██╗   ██║   ██║  ██║███████╗██║ ╚═╝ ██║███████╗
-");
-	pr_info("  ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝
-");
-	pr_info("  ██╗  ██╗███████╗██████╗ ███╗   ██╗███████╗██╗      
-");
-	pr_info("  ██║ ██╔╝██╔════╝██╔══██╗████╗  ██║██╔════╝██║      
-");
-	pr_info("  █████╔╝ █████╗  ██████╔╝██╔██╗ ██║█████╗  ██║      
-");
-	pr_info("  ██╔═██╗ ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ██║      
-");
-	pr_info("  ██║  ██╗███████╗██║  ██║██║ ╚████║███████╗███████╗  
-");
-	pr_info("  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  
-");
-	pr_info("
-");
-	pr_info("  >> Exynos 9820  |  Galaxy S10+ (d2s)  |  Android 15  <<
-");
-	pr_info("  >> KernelSU-Next  |  SUSFS v2.1.0  |  Linux 4.14    <<
-");
-	pr_info("
-");
+	pr_info("\n");
+	pr_info("  ███████╗██╗  ██╗████████╗██████╗ ███████╗███╗   ███╗███████╗\n");
+	pr_info("  ██╔════╝╚██╗██╔╝╚══██╔══╝██╔══██╗██╔════╝████╗ ████║██╔════╝\n");
+	pr_info("  █████╗   ╚███╔╝    ██║   ██████╔╝█████╗  ██╔████╔██║█████╗  \n");
+	pr_info("  ██╔══╝   ██╔██╗    ██║   ██╔══██╗██╔══╝  ██║╚██╔╝██║██╔══╝  \n");
+	pr_info("  ███████╗██╔╝ ██╗   ██║   ██║  ██║███████╗██║ ╚═╝ ██║███████╗\n");
+	pr_info("  ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝\n");
+	pr_info("  ██╗  ██╗███████╗██████╗ ███╗   ██╗███████╗██╗      \n");
+	pr_info("  ██║ ██╔╝██╔════╝██╔══██╗████╗  ██║██╔════╝██║      \n");
+	pr_info("  █████╔╝ █████╗  ██████╔╝██╔██╗ ██║█████╗  ██║      \n");
+	pr_info("  ██╔═██╗ ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ██║      \n");
+	pr_info("  ██║  ██╗███████╗██║  ██║██║ ╚████║███████╗███████╗  \n");
+	pr_info("  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  \n");
+	pr_info("\n");
+	pr_info("  >> Exynos 9820  |  Galaxy S10+ (d2s)  |  Android 15  <<\n");
+	pr_info("  >> KernelSU-Next  |  SUSFS v2.1.0  |  Linux 4.14    <<\n");
+	pr_info("\n");
 #ifdef CONFIG_RKP
 	rkp_robuffer_init();
 #endif
