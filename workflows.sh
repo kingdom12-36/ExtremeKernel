@@ -68,12 +68,19 @@ if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
     popd > /dev/null
 fi
 
-MAKE_ARGS="
-LLVM=1 \
-LLVM_IAS=1 \
-ARCH=arm64 \
-O=out
-"
+MAKE_FLAGS=(
+  LLVM=1
+  LLVM_IAS=1
+  ARCH=arm64
+  O=out
+)
+
+# ccache: inject CC/CXX wrappers when USE_CCACHE=1 is set by CI
+if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
+  echo "ccache enabled — dir: ${CCACHE_DIR:-~/.ccache}"
+  ccache --zero-stats 2>/dev/null || true
+  MAKE_FLAGS+=(CC="ccache clang" CXX="ccache clang++")
+fi
 
 # Define specific variables
 case $MODEL in
@@ -167,11 +174,11 @@ echo "-----------------------------------------------"
 echo "Building kernel using "$KERNEL_DEFCONFIG""
 echo "Generating configuration file..."
 echo "-----------------------------------------------"
-make ${MAKE_ARGS} -j$CORES exynos9820_defconfig $MODEL.config $KSU $RECOVERY || abort
+make "${MAKE_FLAGS[@]}" -j$CORES exynos9820_defconfig $MODEL.config $KSU $RECOVERY || abort
 
 echo "Building kernel..."
 echo "-----------------------------------------------"
-make ${MAKE_ARGS} -j$CORES || abort
+make "${MAKE_FLAGS[@]}" -j$CORES || abort
 
 # Define constant variables
 KERNEL_PATH=build/out/$MODEL/Image
@@ -248,4 +255,5 @@ if [ -z "$RECOVERY" ]; then
 fi
 
 popd > /dev/null
+[ -n "${USE_CCACHE:-}" ] && ccache --show-stats 2>/dev/null || true
 echo "Build finished successfully!"
