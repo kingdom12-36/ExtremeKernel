@@ -69,7 +69,7 @@ if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
 fi
 
 # Ensure 'clang' binary/symlink exists alongside clang-18
-# (required for LLVM=1 host builds via ccache wrappers)
+# (required when LLVM=1 sets HOSTCC=clang in the kernel Makefile)
 if [ -f "$CLANG_DIR/bin/clang-18" ] && [ ! -e "$CLANG_DIR/bin/clang" ]; then
     ln -sf clang-18 "$CLANG_DIR/bin/clang"
     echo "Created clang -> clang-18 symlink"
@@ -80,13 +80,15 @@ MAKE_FLAGS=(
   LLVM_IAS=1
   ARCH=arm64
   O=out
+  HOSTCC=gcc
+  HOSTCXX=g++
 )
 
 # ccache: inject CC/CXX wrappers when USE_CCACHE=1 is set by CI
 if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
   echo "ccache enabled — dir: ${CCACHE_DIR:-~/.ccache}"
   ccache --zero-stats 2>/dev/null || true
-    # Use PATH-level wrapper scripts instead of CC= make var.
+  # Use PATH-level wrapper scripts instead of CC= make var.
   # CC="ccache clang" as a Makefile variable breaks prepare-compiler-check.
   # Resolve to absolute path — make runs in out/ subdir, relative paths break
   _CLANG_ABS="$(cd "$CLANG_DIR" && pwd)"
