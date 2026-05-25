@@ -81,14 +81,16 @@ if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
   ccache --zero-stats 2>/dev/null || true
     # Use PATH-level wrapper scripts instead of CC= make var.
   # CC="ccache clang" as a Makefile variable breaks prepare-compiler-check.
+  # Resolve to absolute path — make runs in out/ subdir, relative paths break
+  _CLANG_ABS="$(cd "$CLANG_DIR" && pwd)"
   mkdir -p /tmp/ccwrap
   for _b in clang clang++ clang-18; do
-    [ -f "$CLANG_DIR/bin/$_b" ] || continue
-    printf '#!/bin/sh\nexec ccache "%s" "$@"\n' "$CLANG_DIR/bin/$_b" > "/tmp/ccwrap/$_b"
+    [ -f "$_CLANG_ABS/bin/$_b" ] || continue
+    printf '#!/bin/sh\nexec ccache "%s" "$@"\n' "$_CLANG_ABS/bin/$_b" > "/tmp/ccwrap/$_b"
     chmod +x "/tmp/ccwrap/$_b"
   done
   export PATH="/tmp/ccwrap:$PATH"
-  echo "ccache wrappers: $(ls /tmp/ccwrap)"
+  echo "ccache wrappers active: $(ls /tmp/ccwrap | tr '\n' ' ')"
 fi
 
 # Define specific variables
