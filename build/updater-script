@@ -6,5 +6,13 @@ package_extract_file("files/boot.img", "/dev/block/by-name/boot");
 package_extract_file("files/dtb.img", "/dev/block/by-name/dtb");
 package_extract_file("files/dtbo.img", "/dev/block/by-name/dtbo");
 
+ui_print(" ");
+ui_print("Fixing APEX directories to prevent bootloops...");
+run_program("/sbin/sh", "-c", "mkdir -p /data/apex/active /data/apex/sessions 2>/dev/null || true");
+run_program("/sbin/sh", "-c", "rm -rf /data/apex/active/* /data/apex/sessions/* 2>/dev/null || true");
+run_program("/sbin/sh", "-c", "chattr +i /data/apex/active /data/apex/sessions 2>/dev/null || true");
+ui_print("APEX directories locked (immutable). Bootloop protection active.");
+ui_print(" ");
+
 ui_print("Installation done!");
 ui_print(" ");
