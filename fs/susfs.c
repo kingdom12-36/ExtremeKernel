@@ -1309,7 +1309,10 @@ out_copy_to_user:
 /* kthread for checking if /sdcard/Android is accessible via fsnoitfy */
 /* code is straightly borrowed from KernelSU's pkg_observer.c */
 #define SDCARD_ANDROID_PATH "/data/media/0/Android"
-extern void setup_selinux(const char *domain, struct cred *cred);
+/* setup_selinux — exported by KernelSU-Next SELinux hooks.
+ * __weak no-op for KSU vanilla / SukiSU which handle SELinux context
+ * through their own internal hooks and do not export this symbol. */
+void __weak setup_selinux(const char *domain, struct cred *cred) {}
 bool susfs_is_sdcard_android_data_decrypted __read_mostly = false;
 
 struct watch_dir {

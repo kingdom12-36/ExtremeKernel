@@ -83,7 +83,13 @@ bool susfs_is_current_ksu_domain(void)
  * susfs_is_allow_su() — true if the calling process's UID is in the
  * KernelSU-Next allowlist.
  */
-extern bool __ksu_is_allow_uid(uid_t uid);
+/* __ksu_is_allow_uid — exported by KernelSU-Next.
+ * __weak fallback for KSU vanilla / SukiSU: only UID 0 is treated as
+ * allowed, which is safe — non-root processes cannot escalate via susfs. */
+bool __weak __ksu_is_allow_uid(uid_t uid)
+{
+        return uid == 0;
+}
 
 bool susfs_is_allow_su(void)
 {
