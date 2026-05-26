@@ -39,16 +39,6 @@ jobs:
           cd kpatch-next/kernel
           make hdr
 
-      - name: Build extreme-tweaker.kpm
-        run: |
-          export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
-          export KP_DIR=$PWD/kpatch-next
-          export CFLAGS="-Wall -O2 -mgeneral-regs-only -fno-pic -fno-pie -mcmodel=large -D__KERNEL__"
-          cd kpms/extreme-tweaker
-          make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR" CFLAGS="$CFLAGS"
-          ls -lh extreme-tweaker.kpm
-          file extreme-tweaker.kpm
-
       - name: Build battery-saver.kpm
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
@@ -69,14 +59,106 @@ jobs:
           ls -lh disabler.kpm
           file disabler.kpm
 
+      - name: Build extreme-tweaker.kpm
+        run: |
+          export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
+          export KP_DIR=$PWD/kpatch-next
+          export CFLAGS="-Wall -O2 -mgeneral-regs-only -fno-pic -fno-pie -mcmodel=large -D__KERNEL__"
+          cd kpms/extreme-tweaker
+          make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR" CFLAGS="$CFLAGS"
+          ls -lh extreme-tweaker.kpm
+          file extreme-tweaker.kpm
+
+      - name: Build undervolt.kpm
+        run: |
+          export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
+          export KP_DIR=$PWD/kpatch-next
+          export CFLAGS="-Wall -O2 -mgeneral-regs-only -fno-pic -fno-pie -mcmodel=large -D__KERNEL__"
+          cd kpms/undervolt
+          make TARGET_COMPILE="$TARGET_COMPILE" KP_DIR="$KP_DIR" CFLAGS="$CFLAGS"
+          ls -lh undervolt.kpm
+          file undervolt.kpm
+
+      - name: Package flashable KSU-Next ZIP
+        run: |
+          # Gather all built KPMs
+          mkdir -p flash-pkg/kpms
+          mkdir -p flash-pkg/META-INF/com/google/android
+
+          cp kpms/battery-saver/battery-saver.kpm     flash-pkg/kpms/
+          cp kpms/disabler/disabler.kpm                flash-pkg/kpms/
+          cp kpms/extreme-tweaker/extreme-tweaker.kpm  flash-pkg/kpms/
+          cp kpms/undervolt/undervolt.kpm              flash-pkg/kpms/
+
+          # Installer script (update-binary)
+          cat > flash-pkg/META-INF/com/google/android/update-binary << 'INSTALLER'
+          #!/sbin/sh
+          SKIPUNZIP=1
+          OUTFD=$2
+          ZIPFILE=$3
+
+          ui_print() {
+            echo -e "ui_print $1\nui_print" >> /proc/self/fd/$OUTFD
+          }
+
+          ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          ui_print " ExtremeKernel KPM Installer"
+          ui_print " Galaxy S20 Ultra (d2s) 4.14"
+          ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          KPATCH_DIR="/data/adb/kpatch"
+          mkdir -p "$KPATCH_DIR"
+
+          mkdir -p /tmp/ek-kpm-install
+          unzip -o "$ZIPFILE" 'kpms/*.kpm' -d /tmp/ek-kpm-install/ >/dev/null 2>&1
+
+          KPM_COUNT=$(ls /tmp/ek-kpm-install/kpms/*.kpm 2>/dev/null | wc -l)
+          if [ "$KPM_COUNT" -eq 0 ]; then
+            ui_print " ERROR: No .kpm files found in ZIP!"
+            exit 1
+          fi
+
+          ui_print " Installing $KPM_COUNT KPM modules:"
+
+          for kpm in /tmp/ek-kpm-install/kpms/*.kpm; do
+            name=$(basename "$kpm")
+            cp "$kpm" "$KPATCH_DIR/$name"
+            chmod 644 "$KPATCH_DIR/$name"
+            ui_print "   OK $name"
+          done
+
+          rm -rf /tmp/ek-kpm-install
+
+          ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          ui_print " Done! Reboot to activate KPMs."
+          ui_print " Verify: dmesg | grep -E 'EK-'"
+          ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          INSTALLER
+
+          chmod +x flash-pkg/META-INF/com/google/android/update-binary
+          echo "# ExtremeKernel KPM Package" > flash-pkg/META-INF/com/google/android/updater-script
+
+          # Build the ZIP
+          cd flash-pkg
+          ZIP_NAME="ExtremeKernel-KPMs-build${{ github.run_number }}.zip"
+          zip -r "../$ZIP_NAME" . -x "*.DS_Store"
+          cd ..
+
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          ls -lh "$ZIP_NAME"
+          echo "Contents:"
+          unzip -l "$ZIP_NAME"
+
       - name: Upload all KPMs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKernel-KPMs
+          name: ExtremeKernel-KPMs-build${{ github.run_number }}
           path: |
-            kpms/extreme-tweaker/extreme-tweaker.kpm
             kpms/battery-saver/battery-saver.kpm
             kpms/disabler/disabler.kpm
+            kpms/extreme-tweaker/extreme-tweaker.kpm
+            kpms/undervolt/undervolt.kpm
+            ExtremeKernel-KPMs-build${{ github.run_number }}.zip
           if-no-files-found: error
 
       - name: Create GitHub Release
@@ -86,9 +168,11 @@ jobs:
           tag: kpm-v${{ github.run_number }}
           name: "ExtremeKernel KPMs (build ${{ github.run_number }})"
           artifacts: |
-            kpms/extreme-tweaker/extreme-tweaker.kpm
             kpms/battery-saver/battery-saver.kpm
             kpms/disabler/disabler.kpm
+            kpms/extreme-tweaker/extreme-tweaker.kpm
+            kpms/undervolt/undervolt.kpm
+            ExtremeKernel-KPMs-build${{ github.run_number }}.zip
           allowUpdates: true
           replacesArtifacts: true
           body: |
@@ -99,24 +183,33 @@ jobs:
 
             ---
 
-            ### extreme-tweaker.kpm — Performance Tweaker **v2.0**
-            - battery-focused + full restore on unload
-            - vm.swappiness → 10, dirty_ratio → 20, tcp_fastopen → 3, tcp_slow_start → 0
+            ### Flash all at once (recommended)
+            Download **`ExtremeKernel-KPMs-build${{ github.run_number }}.zip`** and flash via TWRP/OrangeFox.
+            All KPMs install to `/data/adb/kpatch/` and load automatically on next reboot via KernelSU-Next.
 
-            ### battery-saver.kpm — Battery Saver **v2.3** (final)
-            - Reduces CPU/disk wake-ups
-            - Removed dead TCP symbols (not in Samsung 4.14 kernel)
-            - Does NOT touch charging, voltage, or thermals
-
-            ### disabler.kpm — Kernel Debug Disabler **v1.0** (NEW)
-            - Runtime kernel debug disabler
-            - X-macro driven implementation
-            - Disables unnecessary debug features for better performance
+            ### Or install individually via KSU-Next Manager
+            Download individual `.kpm` files → KSU-Next → KPModule → Load.
 
             ---
 
-            ### How to install
-            1. Flash **ExtremeKRNL-Nexus-d2s-KPatch** zip via TWRP/OrangeFox
-            2. In KernelSU Manager → install **KPatch-Next-Module**
-            3. Open KPatch-Next-Module → WebUI → **KPM** tab → **Load**
-            4. Load one or more .kpm files
+            ### Modules included
+
+            | Module | Version | What it does |
+            |--------|---------|-------------|
+            | `battery-saver.kpm` | v2.4 | VM/IO tuning: swappiness→20, writeback→30s |
+            | `disabler.kpm` | v1.1 | Disables kernel panic/debug noise |
+            | `extreme-tweaker.kpm` | v2.2 | dirty_ratio→30%, dirty_bg_ratio→8%, tcp tweaks |
+            | `undervolt.kpm` | v1.0 | CPU -50mV, GPU -25mV voltage reduction |
+
+            ---
+
+            ### Verify after reboot
+            ```bash
+            su -c "dmesg | grep -E 'EK-BATT|EK-DISABLE|EK-TWEAK|EK-UV'"
+            su -c "cat /proc/sys/vm/swappiness"                    # 20
+            su -c "cat /proc/sys/vm/dirty_background_ratio"         # 8
+            su -c "cat /sys/devices/system/cpu/cpufreq/mp-cpufreq/cluster0_volt_table"
+            ```
+
+            ### Full restore
+            KSU-Next → KPModule → trash icon → all original values restored instantly.
