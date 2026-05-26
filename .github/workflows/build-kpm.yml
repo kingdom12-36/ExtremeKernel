@@ -39,7 +39,6 @@ jobs:
           cd kpatch-next/kernel
           make hdr
 
-      # ============= BUILD extreme-tweaker =============
       - name: Build extreme-tweaker.kpm
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
@@ -50,7 +49,6 @@ jobs:
           ls -lh extreme-tweaker.kpm
           file extreme-tweaker.kpm
 
-      # ============= BUILD battery-saver =============
       - name: Build battery-saver.kpm
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
@@ -61,7 +59,6 @@ jobs:
           ls -lh battery-saver.kpm
           file battery-saver.kpm
 
-      # ============= BUILD disabler (جديد) =============
       - name: Build disabler.kpm
         run: |
           export TARGET_COMPILE=$PWD/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-
@@ -72,7 +69,6 @@ jobs:
           ls -lh disabler.kpm
           file disabler.kpm
 
-      # ============= رفع جميع الملفات كـ artifacts =============
       - name: Upload all KPMs as artifact
         uses: actions/upload-artifact@v4
         with:
@@ -83,7 +79,6 @@ jobs:
             kpms/disabler/disabler.kpm
           if-no-files-found: error
 
-      # ============= إنشاء GitHub Release =============
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
@@ -105,14 +100,12 @@ jobs:
             ---
 
             ### extreme-tweaker.kpm — Performance Tweaker **v2.0**
-            - battery-focused tuning
-            - full restore on unload
-            - vm.swappiness → 10, dirty_ratio → 20
-            - tcp_fastopen → 3, tcp_slow_start → 0
+            - battery-focused + full restore on unload
+            - vm.swappiness → 10, dirty_ratio → 20, tcp_fastopen → 3, tcp_slow_start → 0
 
             ### battery-saver.kpm — Battery Saver **v2.3** (final)
             - Reduces CPU/disk wake-ups
-            - Fixed: removed dead TCP symbols (not in Samsung 4.14 kernel)
+            - Removed dead TCP symbols (not in Samsung 4.14 kernel)
             - Does NOT touch charging, voltage, or thermals
 
             ### disabler.kpm — Kernel Debug Disabler **v1.0** (NEW)
