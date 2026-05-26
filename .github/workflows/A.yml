@@ -118,7 +118,7 @@ jobs:
           CCACHE_COMPRESS: "1"
         run: |
           chmod +x ./workflows.sh
-          ./workflows.sh -m d2s -k Y -r N
+          ./workflows.sh -m d2s -k y -r N
 
       - name: Setup KPatch-Next tools
         run: |
