@@ -340,10 +340,11 @@ static long uv_ctl0(const char *args, char *__user out_msg, int outlen)
 {
     const char *msg =
         "undervolt v1.0 active\n"
-        "CL0 (little) : -" __stringify(UV_OFFSET_CL0_UV) " uV\n"
-        "CL1 (big)    : -" __stringify(UV_OFFSET_CL1_UV) " uV\n"
-        "GPU (Mali)   : -" __stringify(UV_OFFSET_GPU_UV) " uV\n"
-        "Floor        :  " __stringify(UV_FLOOR_UV) " uV\n"
+        "CL0 (little) : -50 mV (50000 uV)\n"
+        "CL1 (big)    : -50 mV (50000 uV)\n"
+        "GPU (Mali)   : -25 mV (25000 uV)\n"
+        "Floor        :  550 mV (550000 uV)\n"
+        "(edit UV_OFFSET_* defines in undervolt.c to change)\n"
         "\nTo change offsets: edit kpms/undervolt/undervolt.c,\n"
         "run build-kpm.yml, reinstall the .kpm file.\n"
         "\nVerify:\n"
