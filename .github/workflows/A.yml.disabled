@@ -1,22 +1,31 @@
-name: ExtremeKernel d2s Build (stable + correct fingerprint)
+name: ExtremeKernel d2s Build (all managers)
 
 on:
   push:
   workflow_dispatch:
-    inputs:
-      manager:
-        description: "Root manager (ksun / ksu / sukisu)"
-        required: true
-        default: "ksun"
-        type: choice
-        options:
-        - ksun
-        - ksu
-        - sukisu
 
 jobs:
   build_d2s:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        manager: [ksun, ksu, sukisu]
+        include:
+          - manager: ksun
+            submodule: KernelSU-Next
+            version_base: 30000
+            version_offset: 150
+          - manager: ksu
+            submodule: KernelSU
+            version_base: 10200
+            version_offset: 200
+          - manager: sukisu
+            submodule: SukiSU
+            version_base: 30000
+            version_offset: 200
+
+    name: Build (${{ matrix.manager }})
 
     permissions:
       contents: read
@@ -47,10 +56,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-d2s-${{ github.ref_name }}-${{ github.sha }}
+          key: ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ccache-d2s-${{ github.ref_name }}-
-            ccache-d2s-
+            ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-
+            ccache-d2s-${{ matrix.manager }}-
 
       - name: Install ccache
         run: sudo apt-get install -y ccache
@@ -70,69 +79,44 @@ jobs:
             popd
             echo "Toolchain downloaded and patched."
           else
-            echo "Toolchain restored from cache (glibc dir included)."
+            echo "Toolchain restored from cache."
           fi
 
           if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
-            echo "Creating clang -> clang-18 symlink"
             ln -sf clang-18 "$CLANG_DIR/bin/clang"
           fi
           echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
 
       - name: Sync manager submodule (full history for version calc)
         run: |
-          MANAGER="${{ inputs.manager || 'ksun' }}"
-          case "$MANAGER" in
-            ksu)    SUB_PATH="KernelSU" ;;
-            sukisu) SUB_PATH="SukiSU" ;;
-            *)      SUB_PATH="KernelSU-Next" ;;
-          esac
-
-          echo "Syncing submodule: $SUB_PATH (manager: $MANAGER)"
-          git submodule sync "$SUB_PATH"
-          git submodule update --init --force --no-recommend-shallow "$SUB_PATH"
-          # Unshallow to get full commit history — required for correct version number
-          git -C "$SUB_PATH" fetch --unshallow origin 2>/dev/null || true
-
-          echo "SUB_PATH=$SUB_PATH" >> $GITHUB_ENV
-          echo "MANAGER=$MANAGER" >> $GITHUB_ENV
+          git submodule sync "${{ matrix.submodule }}"
+          git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
+          # Full history required — shallow clone breaks commit-count version calc
+          git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
 
       - name: Generate random KPatch superkey
         run: |
-          KPATCH_SUPERKEY=$(openssl rand -hex 16)
-          echo "KPATCH_SUPERKEY=$KPATCH_SUPERKEY" >> $GITHUB_ENV
-          echo "Superkey generated (saved to build metadata)"
+          echo "KPATCH_SUPERKEY=$(openssl rand -hex 16)" >> $GITHUB_ENV
 
-      - name: Kernel fingerprint (stable)
+      - name: Kernel + manager fingerprint
         run: |
           echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-      - name: Manager version fingerprint
-        run: |
-          cd "${{ env.SUB_PATH }}"
-
+          cd "${{ matrix.submodule }}"
           KSU_COMMIT=$(git rev-parse HEAD)
           COUNT=$(git rev-list --count HEAD)
-
-          # Version formula per manager
-          # ksun:   30000 + commit_count + 150  (matches upstream KSUN convention)
-          # ksu:    10200 + commit_count + 200  (matches upstream KSU convention)
-          # sukisu: 30000 + commit_count + 200  (SukiSU, same base as KSUN)
-          case "${{ env.MANAGER }}" in
-            ksu)    VERSION=$((10200 + COUNT + 200)) ;;
-            sukisu) VERSION=$((30000 + COUNT + 200)) ;;
-            *)      VERSION=$((30000 + COUNT + 150)) ;;
-          esac
+          VERSION=$(( ${{ matrix.version_base }} + COUNT + ${{ matrix.version_offset }} ))
 
           echo "KSU_COMMIT=$KSU_COMMIT" >> $GITHUB_ENV
           echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
 
-          echo "Manager: ${{ env.MANAGER }} | commit: $KSU_COMMIT | count: $COUNT | version: $VERSION"
+          echo "Manager: ${{ matrix.manager }} | submodule: ${{ matrix.submodule }}"
+          echo "Commit: $KSU_COMMIT | count: $COUNT | version: $VERSION"
 
       - name: Show fingerprint summary
         run: |
           echo "===================="
-          echo "Manager:         ${{ env.MANAGER }}"
+          echo "Manager:         ${{ matrix.manager }}"
           echo "Kernel commit:   $KERNEL_COMMIT"
           echo "Manager commit:  $KSU_COMMIT"
           echo "Manager version: $KSU_VERSION"
@@ -148,9 +132,9 @@ jobs:
 
           if [ -n "$ZYGISK_URL" ]; then
             curl -Lo ZygiskNext.zip "$ZYGISK_URL"
-            echo "Downloaded ZygiskNext $ZYGISK_VER → ZygiskNext.zip"
+            echo "Downloaded ZygiskNext $ZYGISK_VER"
           else
-            echo "ZygiskNext release not found, skipping download"
+            echo "ZygiskNext release not found, skipping"
           fi
 
       - name: Build d2s kernel
@@ -161,12 +145,11 @@ jobs:
           CCACHE_COMPRESS: "1"
         run: |
           chmod +x ./workflows.sh
-          ./workflows.sh -m d2s -k y -r N -M ${{ env.MANAGER }}
+          ./workflows.sh -m d2s -k y -r N -M ${{ matrix.manager }}
 
       - name: Setup KPatch-Next tools
         run: |
           KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-          echo "KPatch version: $KPATCH_VER"
           echo "KPATCH_VER=$KPATCH_VER" >> $GITHUB_ENV
 
           curl -Lo kptools        https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
@@ -216,17 +199,14 @@ jobs:
             FNAME="ZygiskNext-${{ env.ZYGISK_VER }}.zip"
             cp ZygiskNext.zip "build/out/d2s/zip/$FNAME"
             cp ZygiskNext.zip "build/out/d2s-kpatch/zip/$FNAME"
-            echo "ZygiskNext bundled as $FNAME in both artifact zips"
-          else
-            echo "ZygiskNext.zip not found, skipping bundle"
           fi
 
       - name: Save build metadata
         run: |
           mkdir -p build/out/meta
           {
+            echo "Manager:         ${{ matrix.manager }}"
             echo "Kernel Commit:   $KERNEL_COMMIT"
-            echo "Manager:         ${{ env.MANAGER }}"
             echo "Manager Commit:  $KSU_COMMIT"
             echo "Manager Version: $KSU_VERSION"
             echo "KPatch-Next:     $KPATCH_VER"
@@ -243,11 +223,11 @@ jobs:
       - name: Upload standard kernel
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-Nexus-d2s-${{ env.MANAGER }}-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-Nexus-d2s-${{ matrix.manager }}-KSU${{ env.KSU_VERSION }}
           path: build/out/d2s/zip
 
       - name: Upload KPatch kernel
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-Nexus-d2s-${{ env.MANAGER }}-KPatch-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-Nexus-d2s-${{ matrix.manager }}-KPatch-KSU${{ env.KSU_VERSION }}
           path: build/out/d2s-kpatch/zip
