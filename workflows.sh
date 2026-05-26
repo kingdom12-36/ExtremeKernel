@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 abort()
 {
     cd -
@@ -14,9 +15,10 @@ unset_flags()
     cat << EOF
 Usage: $(basename "$0") [options]
 Options:
-    -m, --model [value]     Specify the model code of the phone
-    -k, --ksu [Y/n]         Include KernelSU
-    -r, --recovery [y/N]    Compile kernel for an Android Recovery
+    -m, --model [value]              Specify the model code of the phone
+    -k, --ksu [Y/n]                  Include KernelSU
+    -r, --recovery [y/N]             Compile kernel for an Android Recovery
+    -M, --manager [ksun/ksu/sukisu]  Root manager to use (default: ksun)
 EOF
 }
 
@@ -32,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --recovery|-r)
             RECOVERY_OPTION="$2"
+            shift 2
+            ;;
+        --manager|-M)
+            MANAGER="$2"
             shift 2
             ;;
         *)\
@@ -156,6 +162,17 @@ fi
 
 if [[ "${KSU_OPTION,,}" == "y" ]]; then
     KSU=ksu.config
+    # Select manager submodule dir and re-point drivers/kernelsu symlink
+    case "${MANAGER:-ksun}" in
+        ksu)    MANAGER_DIR="KernelSU" ;;
+        sukisu) MANAGER_DIR="SukiSU" ;;
+        *)      MANAGER_DIR="KernelSU-Next" ;;
+    esac
+    echo "-----------------------------------------------"
+    echo "Manager: ${MANAGER:-ksun} → drivers/kernelsu → ../$MANAGER_DIR/kernel"
+    echo "-----------------------------------------------"
+    rm -f drivers/kernelsu
+    ln -sf "../${MANAGER_DIR}/kernel" drivers/kernelsu
 fi
 
 rm -rf build/out/$MODEL
@@ -181,7 +198,7 @@ echo "Defconfig: "$KERNEL_DEFCONFIG""
 if [ -z "$KSU" ]; then
     echo "KSU: No"
 else
-    echo "KSU: Yes"
+    echo "KSU: Yes (manager: ${MANAGER:-ksun})"
 fi
 
 if [ -z "$RECOVERY" ]; then

@@ -3,6 +3,16 @@ name: ExtremeKernel d2s Build (stable + correct fingerprint)
 on:
   push:
   workflow_dispatch:
+    inputs:
+      manager:
+        description: "Root manager (ksun / ksu / sukisu)"
+        required: true
+        default: "ksun"
+        type: choice
+        options:
+        - ksun
+        - ksu
+        - sukisu
 
 jobs:
   build_d2s:
@@ -16,7 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
           token: ${{ github.token }}
 
       - name: Install dependencies
@@ -69,11 +79,23 @@ jobs:
           fi
           echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
 
-      - name: Sync submodules (deterministic + full history)
+      - name: Sync manager submodule (full history for version calc)
         run: |
-          git submodule sync --recursive
-          git submodule update --init --recursive --force --no-recommend-shallow
-          git -C KernelSU-Next fetch --unshallow origin 2>/dev/null || true
+          MANAGER="${{ inputs.manager || 'ksun' }}"
+          case "$MANAGER" in
+            ksu)    SUB_PATH="KernelSU" ;;
+            sukisu) SUB_PATH="SukiSU" ;;
+            *)      SUB_PATH="KernelSU-Next" ;;
+          esac
+
+          echo "Syncing submodule: $SUB_PATH (manager: $MANAGER)"
+          git submodule sync "$SUB_PATH"
+          git submodule update --init --force --no-recommend-shallow "$SUB_PATH"
+          # Unshallow to get full commit history — required for correct version number
+          git -C "$SUB_PATH" fetch --unshallow origin 2>/dev/null || true
+
+          echo "SUB_PATH=$SUB_PATH" >> $GITHUB_ENV
+          echo "MANAGER=$MANAGER" >> $GITHUB_ENV
 
       - name: Generate random KPatch superkey
         run: |
@@ -85,31 +107,51 @@ jobs:
         run: |
           echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-      - name: KernelSU fingerprint + version
+      - name: Manager version fingerprint
         run: |
-          cd KernelSU-Next
-          git fetch --unshallow || true
+          cd "${{ env.SUB_PATH }}"
 
-          echo "KSU_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
+          KSU_COMMIT=$(git rev-parse HEAD)
           COUNT=$(git rev-list --count HEAD)
-          VERSION=$((30000 + COUNT + 150))
 
+          # Version formula per manager
+          # ksun:   30000 + commit_count + 150  (matches upstream KSUN convention)
+          # ksu:    10200 + commit_count + 200  (matches upstream KSU convention)
+          # sukisu: 30000 + commit_count + 200  (SukiSU, same base as KSUN)
+          case "${{ env.MANAGER }}" in
+            ksu)    VERSION=$((10200 + COUNT + 200)) ;;
+            sukisu) VERSION=$((30000 + COUNT + 200)) ;;
+            *)      VERSION=$((30000 + COUNT + 150)) ;;
+          esac
+
+          echo "KSU_COMMIT=$KSU_COMMIT" >> $GITHUB_ENV
           echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
 
-          echo "KernelSU commit: $(git rev-parse HEAD)"
-          echo "KernelSU version: $VERSION"
-
-          cd ..
+          echo "Manager: ${{ env.MANAGER }} | commit: $KSU_COMMIT | count: $COUNT | version: $VERSION"
 
       - name: Show fingerprint summary
         run: |
           echo "===================="
-          echo "Kernel commit: $KERNEL_COMMIT"
-          echo "KernelSU commit: $KSU_COMMIT"
-          echo "KernelSU version: $KSU_VERSION"
+          echo "Manager:         ${{ env.MANAGER }}"
+          echo "Kernel commit:   $KERNEL_COMMIT"
+          echo "Manager commit:  $KSU_COMMIT"
+          echo "Manager version: $KSU_VERSION"
           echo "KPatch superkey: $KPATCH_SUPERKEY"
           echo "===================="
+
+      - name: Download ZygiskNext
+        run: |
+          ZYGISK_JSON=$(curl -sf https://api.github.com/repos/Dr-TSNG/ZygiskNext/releases/latest)
+          ZYGISK_VER=$(echo "$ZYGISK_JSON" | grep '"tag_name"' | cut -d'"' -f4)
+          ZYGISK_URL=$(echo "$ZYGISK_JSON" | grep 'browser_download_url' | grep '\.zip' | head -1 | cut -d'"' -f4)
+          echo "ZYGISK_VER=${ZYGISK_VER:-unknown}" >> $GITHUB_ENV
+
+          if [ -n "$ZYGISK_URL" ]; then
+            curl -Lo ZygiskNext.zip "$ZYGISK_URL"
+            echo "Downloaded ZygiskNext $ZYGISK_VER → ZygiskNext.zip"
+          else
+            echo "ZygiskNext release not found, skipping download"
+          fi
 
       - name: Build d2s kernel
         env:
@@ -119,7 +161,7 @@ jobs:
           CCACHE_COMPRESS: "1"
         run: |
           chmod +x ./workflows.sh
-          ./workflows.sh -m d2s -k y -r N
+          ./workflows.sh -m d2s -k y -r N -M ${{ env.MANAGER }}
 
       - name: Setup KPatch-Next tools
         run: |
@@ -168,14 +210,30 @@ jobs:
             --tags_offset 0x00000100 \
             -o build/out/d2s-kpatch/zip/files/boot.img
 
+      - name: Bundle ZygiskNext into artifacts
+        run: |
+          if [ -f ZygiskNext.zip ]; then
+            FNAME="ZygiskNext-${{ env.ZYGISK_VER }}.zip"
+            cp ZygiskNext.zip "build/out/d2s/zip/$FNAME"
+            cp ZygiskNext.zip "build/out/d2s-kpatch/zip/$FNAME"
+            echo "ZygiskNext bundled as $FNAME in both artifact zips"
+          else
+            echo "ZygiskNext.zip not found, skipping bundle"
+          fi
+
       - name: Save build metadata
         run: |
           mkdir -p build/out/meta
-          echo "Kernel Commit: $KERNEL_COMMIT"         > build/out/meta/build-info.txt
-          echo "KernelSU Commit: $KSU_COMMIT"          >> build/out/meta/build-info.txt
-          echo "KernelSU Version: $KSU_VERSION"        >> build/out/meta/build-info.txt
-          echo "KPatch-Next Version: $KPATCH_VER"      >> build/out/meta/build-info.txt
-          echo "KPatch Superkey: $KPATCH_SUPERKEY"     >> build/out/meta/build-info.txt
+          {
+            echo "Kernel Commit:   $KERNEL_COMMIT"
+            echo "Manager:         ${{ env.MANAGER }}"
+            echo "Manager Commit:  $KSU_COMMIT"
+            echo "Manager Version: $KSU_VERSION"
+            echo "KPatch-Next:     $KPATCH_VER"
+            echo "KPatch Superkey: $KPATCH_SUPERKEY"
+            echo "ZygiskNext:      ${{ env.ZYGISK_VER }}"
+          } > build/out/meta/build-info.txt
+          cat build/out/meta/build-info.txt
 
       - name: Inject metadata into artifacts
         run: |
@@ -185,11 +243,11 @@ jobs:
       - name: Upload standard kernel
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-Nexus-d2s-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-Nexus-d2s-${{ env.MANAGER }}-KSU${{ env.KSU_VERSION }}
           path: build/out/d2s/zip
 
       - name: Upload KPatch kernel
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-Nexus-d2s-KPatch-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-Nexus-d2s-${{ env.MANAGER }}-KPatch-KSU${{ env.KSU_VERSION }}
           path: build/out/d2s-kpatch/zip

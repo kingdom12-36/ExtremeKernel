@@ -3,3 +3,12 @@
 	url = https://github.com/KernelSU-Next/KernelSU-Next
 	branch = legacy-susfs
 
+[submodule "KernelSU"]
+	path = KernelSU
+	url = https://github.com/tiann/KernelSU
+	branch = main
+
+[submodule "SukiSU"]
+	path = SukiSU
+	url = https://github.com/SukiSU-Ultra/SukiSU-Ultra
+	branch = main
