@@ -46,19 +46,32 @@ jobs:
       - name: Setup Neutron Clang 18 toolchain
         run: |
           CLANG_DIR=toolchain/neutron_18
+          ANTMAN="bash <(curl -s https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman)"
+
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
+            # Cache miss — full download + patch
             echo "Toolchain not in cache — downloading Neutron Clang 18..."
             rm -rf "$CLANG_DIR"
             mkdir -p "$CLANG_DIR"
             pushd "$CLANG_DIR"
-            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
+            eval "$ANTMAN" -S=05012024
             echo "Applying glibc compatibility patch..."
-            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+            eval "$ANTMAN" --patch=glibc
             popd
             echo "Toolchain downloaded and patched."
+          elif ! "$CLANG_DIR/bin/clang-18" --version &>/dev/null; then
+            # Cache hit but interpreter path stale — patchelf sets an absolute path
+            # inside /home/runner/.neutron-tc/glibc/ which is ephemeral per-VM.
+            # Re-run the patch to rebuild that directory and re-link the interpreter.
+            echo "Cached toolchain needs glibc re-patch (ephemeral VM path stale)..."
+            pushd "$CLANG_DIR"
+            eval "$ANTMAN" --patch=glibc
+            popd
+            echo "Glibc patch re-applied."
           else
-            echo "Toolchain restored from cache."
+            echo "Toolchain restored from cache and working."
           fi
+
           # Ensure 'clang' symlink exists alongside clang-18
           if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
             echo "Creating clang -> clang-18 symlink"
