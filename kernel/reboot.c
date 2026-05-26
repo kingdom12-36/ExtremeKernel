@@ -282,15 +282,16 @@ static DEFINE_MUTEX(reboot_mutex);
 #ifdef CONFIG_KSU
 extern void ksu_handle_sys_reboot(void);
 #endif
+
+ *
+ * reboot doesn't sync: do that yourself before calling this.
+ */
+
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/uidgid.h>
 #include <linux/susfs_def.h>
 extern void susfs_prctl_dispatch(unsigned long cmd, unsigned long __user *arg);
 #endif /* CONFIG_KSU_SUSFS */
-
- *
- * reboot doesn't sync: do that yourself before calling this.
- */
 SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		void __user *, arg)
 {
