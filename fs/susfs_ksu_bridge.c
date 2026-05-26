@@ -18,9 +18,16 @@
 #include <linux/susfs_def.h>
 #include <linux/susfs.h>
 #include <linux/uaccess.h>
-#include <linux/namei.h>
-#include <linux/mount.h>
 #include <linux/jump_label.h>
+
+/*
+ * MNT_DETACH (= 2) — lazy unmount; avoids blocking on busy mounts.
+ * Defined here to avoid pulling in <linux/fs.h> or <linux/mount.h> which
+ * may conflict with other headers already included transitively.
+ */
+#ifndef MNT_DETACH
+#define MNT_DETACH      2
+#endif
 
 #ifdef CONFIG_KSU_SUSFS
 
@@ -43,26 +50,20 @@ u32 susfs_priv_app_sid = 0;
  * try_umount() — unmount a kernel path.
  *
  * Called from susfs_try_umount() (fs/susfs.c) to unmount paths that were
- * registered via CMD_SUSFS_ADD_TRY_UMOUNT.  Uses kern_path() + path_umount()
- * so no userspace pointer is needed; MNT_DETACH is always OR-ed in to avoid
- * blocking when the mount is busy.
+ * registered via CMD_SUSFS_ADD_TRY_UMOUNT.  Uses forward-declared kern_path()
+ * and path_umount() so no extra headers (which may conflict) are needed.
+ * MNT_DETACH is always OR-ed in to avoid blocking on busy mounts.
  */
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+extern int kern_path(const char *name, unsigned int flags, struct path *path);
 extern int path_umount(struct path *path, int flags);
 void try_umount(const char *mnt, int flags)
 {
         struct path path;
-        int err;
 
-        err = kern_path(mnt, 0, &path);
-        if (err) {
-                pr_warn_ratelimited("susfs: try_umount kern_path('%s'): %d\n",
-                                    mnt, err);
+        if (kern_path(mnt, 0, &path))
                 return;
-        }
-        err = path_umount(&path, flags | MNT_DETACH);
-        if (err)
-                pr_warn_ratelimited("susfs: try_umount('%s'): %d\n", mnt, err);
+        path_umount(&path, flags | MNT_DETACH);
 }
 #endif /* CONFIG_KSU_SUSFS_TRY_UMOUNT */
 
