@@ -192,18 +192,32 @@ rm -rf build/out/$MODEL
 mkdir -p build/out/$MODEL/zip/files
 mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
 
-# Apply susfs kernel patches (required for KernelSU susfs support)
+# Apply susfs kernel patches — manager-aware
+# KSUN  : patch uses KSUN symbols (__ksu_is_allow_uid, setup_selinux) — apply it
+# SukiSU: susfs already built-in inside SukiSU/kernel/ — no external patch needed
+# KSU   : KSUN patch symbols not in KSU vanilla — skip to avoid link errors
 echo "-----------------------------------------------"
-echo "Applying susfs kernel patches..."
+echo "susfs patching — manager: ${MANAGER:-ksun}"
 echo "-----------------------------------------------"
-SUSFS_PATCH="build/patches/50_add_susfs_in_kernel-4.14.patch"
-if [ -f "$SUSFS_PATCH" ]; then
-    patch -p1 --forward --batch < "$SUSFS_PATCH" && echo "susfs patches applied." || echo "susfs patches already applied or skipped."
-else
-    echo "susfs patch not found at $SUSFS_PATCH, skipping."
-fi
+case "${MANAGER:-ksun}" in
+    ksun)
+        SUSFS_PATCH="build/patches/50_add_susfs_in_kernel-4.14.patch"
+        if [ -f "$SUSFS_PATCH" ]; then
+            patch -p1 --forward --batch < "$SUSFS_PATCH" \
+                && echo "susfs patches applied." \
+                || echo "susfs patches already applied or skipped."
+        else
+            echo "susfs patch not found — skipping."
+        fi
+        ;;
+    sukisu)
+        echo "SukiSU has susfs built-in — no external patch needed."
+        ;;
+    ksu)
+        echo "KSU vanilla — KSUN susfs patch incompatible (symbol mismatch) — skipping."
+        ;;
+esac
 echo "-----------------------------------------------"
-
 # Build kernel image
 echo "-----------------------------------------------"
 echo "Defconfig: "$KERNEL_DEFCONFIG""
