@@ -124,11 +124,13 @@ jobs:
         run: |
           KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
           echo "KPatch version: $KPATCH_VER"
+          echo "KPATCH_VER=$KPATCH_VER" >> $GITHUB_ENV
 
-          curl -Lo kptools https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
-          curl -Lo kpimg   https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
+          curl -Lo kptools        https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
+          curl -Lo kpimg          https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
+          curl -Lo kpatch-android https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpatch-android
 
-          chmod +x kptools kpimg
+          chmod +x kptools kpimg kpatch-android
           ./kptools --version || true
 
       - name: Patch kernel with KPatch-Next
@@ -137,15 +139,20 @@ jobs:
           PATCHED_IMAGE=build/out/d2s/Image.kp
 
           ./kptools -i "$IMAGE" -l || true
-          ./kptools -p -i "$IMAGE" -k ./kpimg -o "$PATCHED_IMAGE"
+          # -s sets the superkey required for KPM (Kernel Patch Module) loading.
+          # Without it the kernel has no auth context and reboots on module load.
+          ./kptools -p -i "$IMAGE" -k ./kpimg -s "ExtremeKernel" -o "$PATCHED_IMAGE"
 
           mkdir -p build/out/d2s-kpatch/zip/files
           mkdir -p build/out/d2s-kpatch/zip/META-INF/com/google/android
 
-          cp build/out/d2s/dtb.img build/out/d2s-kpatch/zip/files/dtb.img
+          cp build/out/d2s/dtb.img  build/out/d2s-kpatch/zip/files/dtb.img
           cp build/out/d2s/dtbo.img build/out/d2s-kpatch/zip/files/dtbo.img
-          cp build/update-binary build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
-          cp build/updater-script build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
+          cp build/update-binary    build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
+          cp build/updater-script   build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
+
+          # Bundle the kpatch-android manager tool so it is available on device
+          cp kpatch-android build/out/d2s-kpatch/zip/files/kpatch-android
 
           ./toolchain/mkbootimg \
             --base 0x10000000 \
@@ -167,9 +174,11 @@ jobs:
       - name: Save build metadata
         run: |
           mkdir -p build/out/meta
-          echo "Kernel Commit: $KERNEL_COMMIT" > build/out/meta/build-info.txt
-          echo "KernelSU Commit: $KSU_COMMIT" >> build/out/meta/build-info.txt
-          echo "KernelSU Version: $KSU_VERSION" >> build/out/meta/build-info.txt
+          echo "Kernel Commit: $KERNEL_COMMIT"         > build/out/meta/build-info.txt
+          echo "KernelSU Commit: $KSU_COMMIT"          >> build/out/meta/build-info.txt
+          echo "KernelSU Version: $KSU_VERSION"        >> build/out/meta/build-info.txt
+          echo "KPatch-Next Version: $KPATCH_VER"      >> build/out/meta/build-info.txt
+          echo "KPatch Superkey: ExtremeKernel"        >> build/out/meta/build-info.txt
 
       - name: Inject metadata into artifacts
         run: |
