@@ -282,6 +282,11 @@ static DEFINE_MUTEX(reboot_mutex);
 #ifdef CONFIG_KSU
 extern void ksu_handle_sys_reboot(void);
 #endif
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/uidgid.h>
+#include <linux/susfs_def.h>
+extern void susfs_prctl_dispatch(unsigned long cmd, unsigned long __user *arg);
+#endif /* CONFIG_KSU_SUSFS */
 
  *
  * reboot doesn't sync: do that yourself before calling this.
@@ -296,6 +301,24 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	/* We only trust the superuser with rebooting the system. */
 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
 		return -EPERM;
+
+
+#ifdef CONFIG_KSU_SUSFS
+	/*
+	 * KernelSU-Next susfs IPC channel.
+	 * susfsd uses: syscall(SYS_reboot, 0xDEADBEEF, SUSFS_MAGIC, cmd, arg)
+	 * Intercept before the standard magic-number check so the call is not
+	 * rejected with -EINVAL.
+	 */
+	if ((unsigned int)magic1 == 0xDEADBEEFU &&
+	    (unsigned int)magic2 == 0xFAFAFAFAU) {
+		if (!uid_eq(current_uid(), GLOBAL_ROOT_UID))
+			return -EPERM;
+		susfs_prctl_dispatch((unsigned long)cmd,
+				     (unsigned long __user *)arg);
+		return 0;
+	}
+#endif /* CONFIG_KSU_SUSFS */
 
 	/* For safety, we require "magic" arguments. */
 	if (magic1 != LINUX_REBOOT_MAGIC1 ||
