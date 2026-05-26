@@ -197,8 +197,9 @@ echo "Building kernel using "$KERNEL_DEFCONFIG""
 # -march=armv8.2-a+crypto+crc: Exynos 9825 hardware AES/SHA/CRC32
 # -mtune=cortex-a75          : instruction scheduling for the big core
 # -fno-semantic-interposition: cross-TU inlining without LTO compile-time cost
-# -fno-plt                   : inline PLT stubs → fewer indirect branches → less power
 # -fmerge-all-constants      : deduplicate string/data constants → smaller I-cache footprint
+# NOTE: -fno-plt removed — it conflicts with the host linker (collect2) when the
+#       cross-toolchain bin/ dir is in PATH, causing fixdep link failures.
 # Polly sub-options (all probed — skipped gracefully if absent in this Polly build):
 #   -polly-vectorizer=stripmine : strip-mine loops before vectorizing → wider SIMD usage
 #   -polly-run-dce              : dead-code elimination inside Polly → removes unused paths
@@ -207,7 +208,6 @@ KCFLAGS_EXTRA="-O3"
 KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
 KCFLAGS_EXTRA+=" -mtune=cortex-a75"
 KCFLAGS_EXTRA+=" -fno-semantic-interposition"
-KCFLAGS_EXTRA+=" -fno-plt"
 KCFLAGS_EXTRA+=" -fmerge-all-constants"
 
 # Polly probe: each sub-option probed individually — a missing sub-option in this
