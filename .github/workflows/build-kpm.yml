@@ -11,7 +11,7 @@ on:
 jobs:
   build-kpm:
     name: Build KPM Modules
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
