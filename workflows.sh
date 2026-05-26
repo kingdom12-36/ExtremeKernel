@@ -154,7 +154,7 @@ if [ -z $KSU_OPTION ]; then
     read -p "Include KernelSU (y/N): " KSU_OPTION
 fi
 
-if [[ "$KSU_OPTION" == "y" ]]; then
+if [[ "${KSU_OPTION,,}" == "y" ]]; then
     KSU=ksu.config
 fi
 
