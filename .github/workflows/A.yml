@@ -50,10 +50,6 @@ jobs:
           CLANG_DIR=toolchain/neutron_18
 
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
-            # Cache miss — download toolchain + apply glibc patch.
-            # The patch uses patchelf to embed the absolute path ~/.neutron-tc/glibc/
-            # into each binary. Both toolchain/neutron_18 AND ~/.neutron-tc are cached
-            # together (see Cache step above) so the path is valid on every restore.
             echo "Toolchain not in cache — downloading Neutron Clang 18..."
             rm -rf "$CLANG_DIR"
             mkdir -p "$CLANG_DIR"
@@ -67,7 +63,6 @@ jobs:
             echo "Toolchain restored from cache (glibc dir included)."
           fi
 
-          # Ensure 'clang' symlink exists alongside clang-18
           if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
             echo "Creating clang -> clang-18 symlink"
             ln -sf clang-18 "$CLANG_DIR/bin/clang"
@@ -78,8 +73,13 @@ jobs:
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive --force --no-recommend-shallow
-          # Unshallow KernelSU-Next so rev-list --count gives the real commit count
           git -C KernelSU-Next fetch --unshallow origin 2>/dev/null || true
+
+      - name: Generate random KPatch superkey
+        run: |
+          KPATCH_SUPERKEY=$(openssl rand -hex 16)
+          echo "KPATCH_SUPERKEY=$KPATCH_SUPERKEY" >> $GITHUB_ENV
+          echo "Superkey generated (saved to build metadata)"
 
       - name: Kernel fingerprint (stable)
         run: |
@@ -108,6 +108,7 @@ jobs:
           echo "Kernel commit: $KERNEL_COMMIT"
           echo "KernelSU commit: $KSU_COMMIT"
           echo "KernelSU version: $KSU_VERSION"
+          echo "KPatch superkey: $KPATCH_SUPERKEY"
           echo "===================="
 
       - name: Build d2s kernel
@@ -139,9 +140,7 @@ jobs:
           PATCHED_IMAGE=build/out/d2s/Image.kp
 
           ./kptools -i "$IMAGE" -l || true
-          # -s sets the superkey required for KPM (Kernel Patch Module) loading.
-          # Without it the kernel has no auth context and reboots on module load.
-          ./kptools -p -i "$IMAGE" -k ./kpimg -s "ExtremeKernel" -o "$PATCHED_IMAGE"
+          ./kptools -p -i "$IMAGE" -k ./kpimg -s "$KPATCH_SUPERKEY" -o "$PATCHED_IMAGE"
 
           mkdir -p build/out/d2s-kpatch/zip/files
           mkdir -p build/out/d2s-kpatch/zip/META-INF/com/google/android
@@ -150,9 +149,7 @@ jobs:
           cp build/out/d2s/dtbo.img build/out/d2s-kpatch/zip/files/dtbo.img
           cp build/update-binary    build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
           cp build/updater-script   build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
-
-          # Bundle the kpatch-android manager tool so it is available on device
-          cp kpatch-android build/out/d2s-kpatch/zip/files/kpatch-android
+          cp kpatch-android         build/out/d2s-kpatch/zip/files/kpatch-android
 
           ./toolchain/mkbootimg \
             --base 0x10000000 \
@@ -178,7 +175,7 @@ jobs:
           echo "KernelSU Commit: $KSU_COMMIT"          >> build/out/meta/build-info.txt
           echo "KernelSU Version: $KSU_VERSION"        >> build/out/meta/build-info.txt
           echo "KPatch-Next Version: $KPATCH_VER"      >> build/out/meta/build-info.txt
-          echo "KPatch Superkey: ExtremeKernel"        >> build/out/meta/build-info.txt
+          echo "KPatch Superkey: $KPATCH_SUPERKEY"     >> build/out/meta/build-info.txt
 
       - name: Inject metadata into artifacts
         run: |
