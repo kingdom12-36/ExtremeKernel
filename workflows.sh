@@ -193,24 +193,50 @@ fi
 echo "-----------------------------------------------"
 echo "Building kernel using "$KERNEL_DEFCONFIG""
 # ── Advanced compiler optimizations ─────────────────────────────────────
-# -O3              : overrides kernel default -O2; aggressive inlining + vectorization
-# -march=armv8.2-a : Exynos 9825 = Cortex-A75+A55, both ARMv8.2-A capable
-# +crypto+crc      : hardware AES/SHA and CRC32 (always present on this SoC)
-# -mtune=cortex-a75: instruction scheduling tuned for the big core
+# -O3                        : overrides -O2; aggressive inlining + vectorization
+# -march=armv8.2-a+crypto+crc: Exynos 9825 hardware AES/SHA/CRC32
+# -mtune=cortex-a75          : instruction scheduling for the big core
 # -fno-semantic-interposition: cross-TU inlining without LTO compile-time cost
-# Polly            : polyhedral loop optimizer — auto-tiles, vectorizes, and
-#                   rewrites loops for cache locality. Build time 2-4x slower.
+# -fno-plt                   : inline PLT stubs → fewer indirect branches → less power
+# -fmerge-all-constants      : deduplicate string/data constants → smaller I-cache footprint
+# Polly sub-options (all probed — skipped gracefully if absent in this Polly build):
+#   -polly-vectorizer=stripmine : strip-mine loops before vectorizing → wider SIMD usage
+#   -polly-run-dce              : dead-code elimination inside Polly → removes unused paths
+#   -polly-position=before-vectorizer: run Polly before LLVM vectorizer for best interaction
 KCFLAGS_EXTRA="-O3"
 KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
 KCFLAGS_EXTRA+=" -mtune=cortex-a75"
 KCFLAGS_EXTRA+=" -fno-semantic-interposition"
-# Polly probe: only add -mllvm -polly (the base flag that enables the optimizer).
-# Sub-options like -polly-ast-detect-max-depth and -polly-run-dce may not exist
-# in Polly 18 and would cause clang to fail on EVERY cc-option() capability test
-# (Makefile:1047 puts KCFLAGS into KBUILD_CFLAGS which feeds CC_OPTION_CFLAGS).
-if echo "int f(void){return 0;}" | clang -mllvm -polly -c -x c - -o /dev/null 2>/dev/null; then
+KCFLAGS_EXTRA+=" -fno-plt"
+KCFLAGS_EXTRA+=" -fmerge-all-constants"
+
+# Polly probe: each sub-option probed individually — a missing sub-option in this
+# Polly 18 build is silently skipped rather than breaking every cc-option() test.
+_POLLY_BASE="-mllvm -polly"
+if echo "int f(void){return 0;}" | clang $_POLLY_BASE -c -x c - -o /dev/null 2>/dev/null; then
   echo "Polly available — enabling polyhedral loop optimizer"
-  KCFLAGS_EXTRA+=" -mllvm -polly"
+  KCFLAGS_EXTRA+=" $_POLLY_BASE"
+
+  # strip-mine vectorizer: wider SIMD → fewer iterations → less CPU time → better battery
+  if echo "int f(void){return 0;}" | clang $_POLLY_BASE \
+      -mllvm -polly-vectorizer=stripmine -c -x c - -o /dev/null 2>/dev/null; then
+    echo "  + polly-vectorizer=stripmine"
+    KCFLAGS_EXTRA+=" -mllvm -polly-vectorizer=stripmine"
+  fi
+
+  # dead-code elimination: removes unreachable paths → smaller hot code → less I-cache pressure
+  if echo "int f(void){return 0;}" | clang $_POLLY_BASE \
+      -mllvm -polly-run-dce -c -x c - -o /dev/null 2>/dev/null; then
+    echo "  + polly-run-dce"
+    KCFLAGS_EXTRA+=" -mllvm -polly-run-dce"
+  fi
+
+  # run Polly before the LLVM vectorizer for best loop-opt / vectorizer interaction
+  if echo "int f(void){return 0;}" | clang $_POLLY_BASE \
+      -mllvm -polly-position=before-vectorizer -c -x c - -o /dev/null 2>/dev/null; then
+    echo "  + polly-position=before-vectorizer"
+    KCFLAGS_EXTRA+=" -mllvm -polly-position=before-vectorizer"
+  fi
 else
   echo "Polly not available in this toolchain — skipping"
 fi
