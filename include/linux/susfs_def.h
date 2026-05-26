@@ -47,7 +47,7 @@
 
 #define VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT 0x80000000 /* used for mounts that are unshared by ksu process */
 #define DEFAULT_KSU_MNT_ID 500000 /* used for mounts created or single cloned by ksu process */
-#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 1000000 /* used by vfsmount->susfs_mnt_id_backup */																								   
+#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 1000000 /* used by vfsmount->susfs_mnt_id_backup */                                                                                                                                                                                                
 #define DEFAULT_KSU_MNT_GROUP_ID 5000 /* used by mount->mnt_group_id */
 
 /*
@@ -64,10 +64,11 @@
 #define AS_FLAGS_SUS_KSTAT 35
 #define AS_FLAGS_OPEN_REDIRECT 36
 #define AS_FLAGS_SUS_MAP 39
+#define BIT_SUS_MAPS BIT(AS_FLAGS_SUS_MAP)
 
 #define ND_STATE_LOOKUP_LAST 32
 #define ND_STATE_OPEN_LAST 64
-#define ND_FLAGS_LOOKUP_LAST		0x2000000
+#define ND_FLAGS_LOOKUP_LAST            0x2000000
  
 #define MAGIC_MOUNT_WORKDIR "/debug_ramdisk/workdir"
 
@@ -112,33 +113,33 @@ int data_type, susfs_fname_t file_name, u32 cookie)
 #endif
 
 static inline bool susfs_is_current_proc_umounted(void) {
-	return test_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED);
+        return test_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED);
 }
 
 static inline void susfs_set_current_proc_umounted(void) {
-	set_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED);
+        set_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED);
 }
 
 static inline bool susfs_is_current_proc_umounted_app(void) {
-	return (test_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED) &&
+        return (test_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED) &&
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
-			__kuid_val(current_uid()) >= 10000);
+                        __kuid_val(current_uid()) >= 10000);
 #else
-			current_uid().val >= 10000);
+                        current_uid().val >= 10000);
 #endif
 }
 
 #define SUSFS_IS_INODE_SUS_MAP(inode) \
-		inode && inode->i_mapping && \
-		unlikely(test_bit(AS_FLAGS_SUS_MAP, &inode->i_mapping->flags)) && \
-		susfs_is_current_proc_umounted_app()
+                inode && inode->i_mapping && \
+                unlikely(test_bit(AS_FLAGS_SUS_MAP, &inode->i_mapping->flags)) && \
+                susfs_is_current_proc_umounted_app()
 
 #define SUSFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(inode) \
-		inode && inode->i_mapping && \
-		unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags))
+                inode && inode->i_mapping && \
+                unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags))
 
 #define SUSFS_IS_INODE_OPEN_REDIRECT(inode) \
-		inode && inode->i_mapping && \
-		unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags)) && \
-		susfs_is_current_proc_umounted_app()
+                inode && inode->i_mapping && \
+                unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags)) && \
+                susfs_is_current_proc_umounted_app()
 #endif // #ifndef KSU_SUSFS_DEF_H
