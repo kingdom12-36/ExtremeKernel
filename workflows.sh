@@ -178,7 +178,7 @@ fi
 
 # Android OS version mapping for mkbootimg
 # Determines os_version and os_patch_level used in the boot image header
-case "${ANDROID_VER:-14}" in
+case "${ANDROID_VER:-16}" in
     16) OS_VERSION=16.0.0; OS_PATCH_LEVEL=2025-06 ;;
     15) OS_VERSION=15.0.0; OS_PATCH_LEVEL=2025-05 ;;
     *)  OS_VERSION=14.0.0; OS_PATCH_LEVEL=2025-01 ;;

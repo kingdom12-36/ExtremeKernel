@@ -3,39 +3,11 @@ name: ExtremeKernel d2s Build
 on:
   push:
   workflow_dispatch:
-    inputs:
-      android_ver:
-        description: "Target Android version"
-        required: true
-        default: "14"
-        type: choice
-        options:
-        - "14"
-        - "15"
-        - "16"
 
 jobs:
   build_d2s:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        manager: [ksun, ksu, sukisu]
-        include:
-          - manager: ksun
-            submodule: KernelSU-Next
-            version_base: 30000
-            version_offset: 150
-          - manager: ksu
-            submodule: KernelSU
-            version_base: 10200
-            version_offset: 200
-          - manager: sukisu
-            submodule: SukiSU
-            version_base: 30000
-            version_offset: 200
-
-    name: Build d2s · ${{ matrix.manager }} · Android ${{ inputs.android_ver || '14' }}
+    name: Build d2s (SukiSU · A16 compatible)
 
     permissions:
       contents: write
@@ -51,125 +23,59 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl \
-            zlib1g-dev libc6-dev-i386 libxml2-utils xsltproc unzip fontconfig
+          sudo apt-get install -y git-core gnupg flex bison build-essential \
+            zip curl zlib1g-dev libc6-dev-i386 libxml2-utils xsltproc unzip fontconfig
 
       - name: Cache Neutron Clang 18 toolchain
         uses: actions/cache@v4
         with:
-          path: |
-            toolchain/neutron_18
-            ~/.neutron-tc
+          path: toolchain/neutron_18
           key: neutron-clang-18-05012024-v3
 
-      - name: Cache ccache objects
+      - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ccache-d2s-sukisu-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-
-            ccache-d2s-${{ matrix.manager }}-
+            ccache-d2s-sukisu-${{ github.ref_name }}-
+            ccache-d2s-sukisu-
 
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
-      - name: Setup Neutron Clang 18 toolchain
+      - name: Setup Neutron Clang 18
         run: |
           CLANG_DIR=toolchain/neutron_18
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
-            echo "Toolchain not in cache — downloading Neutron Clang 18..."
-            rm -rf "$CLANG_DIR"
-            mkdir -p "$CLANG_DIR"
+            rm -rf "$CLANG_DIR" && mkdir -p "$CLANG_DIR"
             pushd "$CLANG_DIR"
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
-            echo "Applying glibc compatibility patch..."
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
             popd
-            echo "Toolchain downloaded and patched."
-          else
-            echo "Toolchain restored from cache."
           fi
-          if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
-            ln -sf clang-18 "$CLANG_DIR/bin/clang"
-          fi
+          [ ! -e "$CLANG_DIR/bin/clang" ] && ln -sf clang-18 "$CLANG_DIR/bin/clang"
           echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
 
-      - name: Sync manager submodule (full history for version calc)
+      - name: Sync SukiSU submodule (full history for version number)
         run: |
-          git submodule sync "${{ matrix.submodule }}"
-          git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
-          # Full unshallow — shallow clone gives wrong commit count → wrong version number
-          git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
+          git submodule sync SukiSU
+          git submodule update --init --force --no-recommend-shallow SukiSU
+          git -C SukiSU fetch --unshallow origin 2>/dev/null || true
 
-      - name: Kernel + manager fingerprint
+      - name: Compute version numbers
         run: |
-          echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
-          cd "${{ matrix.submodule }}"
-          KSU_COMMIT=$(git rev-parse HEAD)
+          echo "KERNEL_COMMIT=$(git rev-parse HEAD)"     >> $GITHUB_ENV
+          cd SukiSU
+          echo "KSU_COMMIT=$(git rev-parse HEAD)"        >> $GITHUB_ENV
           COUNT=$(git rev-list --count HEAD)
-          VERSION=$(( ${{ matrix.version_base }} + COUNT + ${{ matrix.version_offset }} ))
-          echo "KSU_COMMIT=$KSU_COMMIT"   >> $GITHUB_ENV
-          echo "KSU_VERSION=$VERSION"     >> $GITHUB_ENV
-          echo "Manager: ${{ matrix.manager }} | count: $COUNT | version: $VERSION"
+          echo "KSU_VERSION=$((30000 + COUNT + 200))"   >> $GITHUB_ENV
+          echo "KSU_COUNT=$COUNT"                        >> $GITHUB_ENV
 
       - name: Generate KPatch superkey
         run: echo "KPATCH_SUPERKEY=$(openssl rand -hex 16)" >> $GITHUB_ENV
 
-      - name: Show build summary
-        run: |
-          echo "====================================="
-          echo "  Manager:         ${{ matrix.manager }}"
-          echo "  Android target:  ${{ inputs.android_ver || '14' }}"
-          echo "  Kernel commit:   $KERNEL_COMMIT"
-          echo "  Manager commit:  $KSU_COMMIT"
-          echo "  Manager version: $KSU_VERSION"
-          echo "====================================="
-
-      # Download official manager APKs from their own GitHub releases (no third parties)
-      - name: Download official manager APKs
-        run: |
-          mkdir -p managers
-
-          # KernelSU-Next (official) — normal + spoofed variant
-          KSUN_JSON=$(curl -sf https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest)
-          KSUN_VER=$(echo "$KSUN_JSON" | grep '"tag_name"' | cut -d'"' -f4)
-          echo "$KSUN_JSON" | grep 'browser_download_url' | grep '\.apk' | grep -v spoofed | cut -d'"' -f4 | \
-            xargs -I{} curl -fsSL -o "managers/KernelSU-Next-${KSUN_VER}.apk" "{}" || true
-          echo "$KSUN_JSON" | grep 'browser_download_url' | grep '\.apk' | grep spoofed | cut -d'"' -f4 | \
-            xargs -I{} curl -fsSL -o "managers/KernelSU-Next-${KSUN_VER}-spoofed.apk" "{}" || true
-          echo "KSUN_VER=$KSUN_VER" >> $GITHUB_ENV
-
-          # KernelSU vanilla (official)
-          KSU_JSON=$(curl -sf https://api.github.com/repos/tiann/KernelSU/releases/latest)
-          KSU_VER=$(echo "$KSU_JSON" | grep '"tag_name"' | cut -d'"' -f4)
-          echo "$KSU_JSON" | grep 'browser_download_url' | grep '\.apk' | cut -d'"' -f4 | head -1 | \
-            xargs -I{} curl -fsSL -o "managers/KernelSU-${KSU_VER}.apk" "{}" || true
-          echo "KSU_VER=$KSU_VER" >> $GITHUB_ENV
-
-          # SukiSU (official)
-          SUKI_JSON=$(curl -sf https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest)
-          SUKI_VER=$(echo "$SUKI_JSON" | grep '"tag_name"' | cut -d'"' -f4)
-          echo "$SUKI_JSON" | grep 'browser_download_url' | grep '\.apk' | cut -d'"' -f4 | head -1 | \
-            xargs -I{} curl -fsSL -o "managers/SukiSU-${SUKI_VER}.apk" "{}" || true
-          echo "SUKI_VER=$SUKI_VER" >> $GITHUB_ENV
-
-          echo "--- Downloaded manager APKs ---"
-          ls -lh managers/ || true
-
-      # Download ZygiskNext (official, from Dr-TSNG)
-      - name: Download ZygiskNext
-        run: |
-          ZYGISK_JSON=$(curl -sf https://api.github.com/repos/Dr-TSNG/ZygiskNext/releases/latest)
-          ZYGISK_VER=$(echo "$ZYGISK_JSON" | grep '"tag_name"' | cut -d'"' -f4)
-          ZYGISK_URL=$(echo "$ZYGISK_JSON" | grep 'browser_download_url' | grep '\.zip' | head -1 | cut -d'"' -f4)
-          echo "ZYGISK_VER=${ZYGISK_VER:-unknown}" >> $GITHUB_ENV
-          if [ -n "$ZYGISK_URL" ]; then
-            curl -fsSL -o ZygiskNext.zip "$ZYGISK_URL"
-            echo "Downloaded ZygiskNext $ZYGISK_VER"
-          fi
-
-      - name: Build d2s kernel
+      - name: Build kernel (SukiSU · os_version 16.0.0)
         env:
           USE_CCACHE: "1"
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -177,132 +83,92 @@ jobs:
           CCACHE_COMPRESS: "1"
         run: |
           chmod +x ./workflows.sh
-          ./workflows.sh -m d2s -k y -r N \
-            -M ${{ matrix.manager }} \
-            -A ${{ inputs.android_ver || '14' }}
+          # SukiSU driver + Android 16 os_version so the boot image is accepted on A14/A15/A16 ROMs
+          ./workflows.sh -m d2s -k y -r N -M sukisu -A 16
 
       - name: Setup KPatch-Next tools
         run: |
-          KPATCH_VER=$(curl -sf https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          KPATCH_VER=$(curl -sf https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
           echo "KPATCH_VER=$KPATCH_VER" >> $GITHUB_ENV
-          curl -fsSL -o kptools        https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
-          curl -fsSL -o kpimg          https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
-          curl -fsSL -o kpatch-android https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpatch-android
+          for bin in kptools-linux kpimg-linux kpatch-android; do
+            curl -fsSL -o "${bin%-linux}" \
+              "https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/${bin}"
+          done
           chmod +x kptools kpimg kpatch-android
-          ./kptools --version || true
+          mv kptools-linux kptools 2>/dev/null || true
+          mv kpimg-linux   kpimg   2>/dev/null || true
 
       - name: Patch kernel with KPatch-Next
         run: |
           IMAGE=build/out/d2s/Image
-          PATCHED_IMAGE=build/out/d2s/Image.kp
-          ./kptools -i "$IMAGE" -l || true
-          ./kptools -p -i "$IMAGE" -k ./kpimg -s "$KPATCH_SUPERKEY" -o "$PATCHED_IMAGE"
+          PATCHED=build/out/d2s/Image.kp
+          ./kptools -p -i "$IMAGE" -k ./kpimg -s "$KPATCH_SUPERKEY" -o "$PATCHED"
 
-          mkdir -p build/out/d2s-kpatch/zip/files
-          mkdir -p build/out/d2s-kpatch/zip/META-INF/com/google/android
-          cp build/out/d2s/dtb.img  build/out/d2s-kpatch/zip/files/
-          cp build/out/d2s/dtbo.img build/out/d2s-kpatch/zip/files/
-          cp build/update-binary    build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
-          cp build/updater-script   build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
-          cp kpatch-android         build/out/d2s-kpatch/zip/files/
+          mkdir -p build/out/d2s-kpatch/zip/{files,META-INF/com/google/android}
+          cp build/out/d2s/{dtb.img,dtbo.img}  build/out/d2s-kpatch/zip/files/
+          cp build/update-binary   build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
+          cp build/updater-script  build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
+          cp kpatch-android        build/out/d2s-kpatch/zip/files/
 
           ./toolchain/mkbootimg \
-            --base 0x10000000 --board SRPSC14B009KU \
-            --cmdline 'loop.max_part=7' --hashtype sha1 \
-            --header_version 1 --kernel "$PATCHED_IMAGE" \
+            --base 0x10000000 --board SRPSC14B009KU --cmdline 'loop.max_part=7' \
+            --hashtype sha1 --header_version 1 --kernel "$PATCHED" \
             --kernel_offset 0x00008000 \
-            --os_patch_level 2025-01 --os_version 14.0.0 \
+            --os_patch_level 2025-06 --os_version 16.0.0 \
             --pagesize 2048 \
             --ramdisk build/out/d2s/ramdisk.cpio.gz \
             --ramdisk_offset 0xF0000000 --second_offset 0xF0000000 \
             --tags_offset 0x00000100 \
             -o build/out/d2s-kpatch/zip/files/boot.img
 
-      # Bundle everything: ZygiskNext + all official manager APKs into both zips
-      - name: Bundle ZygiskNext + manager APKs into artifacts
-        run: |
-          for DIR in build/out/d2s/zip build/out/d2s-kpatch/zip; do
-            mkdir -p "$DIR/managers"
-            # ZygiskNext
-            [ -f ZygiskNext.zip ] && cp ZygiskNext.zip "$DIR/ZygiskNext-${{ env.ZYGISK_VER }}.zip"
-            # All official manager APKs
-            cp managers/*.apk "$DIR/managers/" 2>/dev/null || true
-          done
+          pushd build/out/d2s-kpatch/zip
+          zip -r ../ExtremeKRNL-Nexus-d2s-KPatch.zip .
+          popd
 
-      - name: Save build metadata
-        run: |
-          mkdir -p build/out/meta
-          {
-            echo "ExtremeKernel d2s — Build Info"
-            echo "================================"
-            echo "Manager:         ${{ matrix.manager }}"
-            echo "Android target:  ${{ inputs.android_ver || '14' }}"
-            echo "Kernel commit:   $KERNEL_COMMIT"
-            echo "Manager commit:  $KSU_COMMIT"
-            echo "Manager version: $KSU_VERSION"
-            echo "KPatch-Next:     $KPATCH_VER"
-            echo "ZygiskNext:      ${{ env.ZYGISK_VER }}"
-            echo "KSUN manager:    ${{ env.KSUN_VER }}"
-            echo "KSU manager:     ${{ env.KSU_VER }}"
-            echo "SukiSU manager:  ${{ env.SUKI_VER }}"
-          } > build/out/meta/build-info.txt
-          cat build/out/meta/build-info.txt
-
-      - name: Inject metadata into artifacts
-        run: |
-          cp build/out/meta/build-info.txt build/out/d2s/zip/
-          cp build/out/meta/build-info.txt build/out/d2s-kpatch/zip/
-
-      - name: Upload standard kernel artifact
+      - name: Upload standard artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-d2s-${{ matrix.manager }}-A${{ inputs.android_ver || '14' }}-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-d2s-SukiSU-A16compat-${{ env.KSU_VERSION }}
           path: build/out/d2s/zip
 
-      - name: Upload KPatch kernel artifact
+      - name: Upload KPatch artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-d2s-${{ matrix.manager }}-A${{ inputs.android_ver || '14' }}-KPatch-KSU${{ env.KSU_VERSION }}
+          name: ExtremeKRNL-d2s-KPatch-SukiSU-A16compat-${{ env.KSU_VERSION }}
           path: build/out/d2s-kpatch/zip
 
-      # Create/update GitHub Release — each matrix job adds its own artifacts
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: build-${{ github.run_number }}
-          name: "ExtremeKernel d2s — Build ${{ github.run_number }} (Android ${{ inputs.android_ver || '14' }})"
+          name: "ExtremeKernel d2s — Build ${{ github.run_number }}"
           allowUpdates: true
           replacesArtifacts: false
           artifacts: |
             build/out/d2s/zip/ExtremeKRNL-Nexus-d2s.zip
+            build/out/d2s-kpatch/zip/ExtremeKRNL-Nexus-d2s-KPatch.zip
           body: |
-            ## ExtremeKernel for Galaxy S20 Ultra (d2s)
-            **Android target:** ${{ inputs.android_ver || '14' }}
-            **Build:** #${{ github.run_number }}
+            ## ExtremeKernel — Galaxy S20 Ultra (d2s)
+            Built with **SukiSU** — works with KernelSU-Next, KernelSU, and SukiSU manager apps.
+            Boot image compiled with `os_version=16.0.0` — compatible with Android 14, 15, and 16 ROMs.
+
+            | File | Notes |
+            |------|-------|
+            | `ExtremeKRNL-Nexus-d2s.zip` | Standard kernel |
+            | `ExtremeKRNL-Nexus-d2s-KPatch.zip` | KPatch-Next signed (superkey: stored in build secrets) |
+
+            ### Manager apps (download separately)
+            | Manager | Download |
+            |---------|----------|
+            | KernelSU-Next *(recommended)* | [KernelSU-Next releases](https://github.com/KernelSU-Next/KernelSU-Next/releases/latest) |
+            | KernelSU-Next Spoofed | same page — spoofed variant |
+            | KernelSU (vanilla) | [tiann/KernelSU releases](https://github.com/tiann/KernelSU/releases/latest) |
+            | SukiSU | [SukiSU-Ultra releases](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/latest) |
+            | ZygiskNext | [Dr-TSNG/ZygiskNext releases](https://github.com/Dr-TSNG/ZygiskNext/releases/latest) |
 
             ---
+            **KSU version:** `${{ env.KSU_VERSION }}` | **Kernel commit:** `${{ env.KERNEL_COMMIT }}` | **SukiSU commit:** `${{ env.KSU_COMMIT }}`
 
-            ### Root managers included in each zip (official builds only)
-            All manager APKs are downloaded directly from their official GitHub repos at build time — no modifications.
-
-            | Manager | Version | Source |
-            |---------|---------|--------|
-            | KernelSU-Next | ${{ env.KSUN_VER }} | [KernelSU-Next/KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next) |
-            | KernelSU-Next (spoofed) | ${{ env.KSUN_VER }} | Same repo, spoofed variant |
-            | KernelSU | ${{ env.KSU_VER }} | [tiann/KernelSU](https://github.com/tiann/KernelSU) |
-            | SukiSU | ${{ env.SUKI_VER }} | [SukiSU-Ultra/SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) |
-            | ZygiskNext | ${{ env.ZYGISK_VER }} | [Dr-TSNG/ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext) |
-
-            ### Kernel builds
-            Each zip is self-contained: kernel + manager APKs + ZygiskNext + build-info.txt
-
-            | File | Manager | Notes |
-            |------|---------|-------|
-            | `ExtremeKRNL-d2s-ksun-*` | KSUN | KernelSU-Next + susfs |
-            | `ExtremeKRNL-d2s-ksu-*` | KSU vanilla | tiann/KernelSU |
-            | `ExtremeKRNL-d2s-sukisu-*` | SukiSU | built-in susfs + Zygisk |
-            | `*-KPatch-*` | any | same kernel, KPatch-Next signed |
-
-            ---
-            > ⚠️ Flashing custom kernels may void warranty. Backup your boot image first.
+            > ⚠️ Flashing custom kernels may void warranty. Backup your boot image before proceeding.
