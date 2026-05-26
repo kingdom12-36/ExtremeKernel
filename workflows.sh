@@ -19,6 +19,7 @@ Options:
     -k, --ksu [Y/n]                  Include KernelSU
     -r, --recovery [y/N]             Compile kernel for an Android Recovery
     -M, --manager [ksun/ksu/sukisu]  Root manager to use (default: ksun)
+    -A, --android-ver [14/15/16]     Target Android OS version (default: 14)
 EOF
 }
 
@@ -38,6 +39,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --manager|-M)
             MANAGER="$2"
+            shift 2
+            ;;
+        --android-ver|-A)
+            ANDROID_VER="$2"
             shift 2
             ;;
         *)\
@@ -75,7 +80,6 @@ if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
 fi
 
 # Ensure 'clang' binary/symlink exists alongside clang-18
-# (required when LLVM=1 sets HOSTCC=clang in the kernel Makefile)
 if [ -f "$CLANG_DIR/bin/clang-18" ] && [ ! -e "$CLANG_DIR/bin/clang" ]; then
     ln -sf clang-18 "$CLANG_DIR/bin/clang"
     echo "Created clang -> clang-18 symlink"
@@ -94,9 +98,6 @@ MAKE_FLAGS=(
 if [ -n "${USE_CCACHE:-}" ] && command -v ccache &>/dev/null; then
   echo "ccache enabled — dir: ${CCACHE_DIR:-~/.ccache}"
   ccache --zero-stats 2>/dev/null || true
-  # Use PATH-level wrapper scripts instead of CC= make var.
-  # CC="ccache clang" as a Makefile variable breaks prepare-compiler-check.
-  # Resolve to absolute path — make runs in out/ subdir, relative paths break
   _CLANG_ABS="$(cd "$CLANG_DIR" && pwd)"
   mkdir -p /tmp/ccwrap
   for _b in clang clang++ clang-18; do
@@ -175,6 +176,18 @@ if [[ "${KSU_OPTION,,}" == "y" ]]; then
     ln -sf "../${MANAGER_DIR}/kernel" drivers/kernelsu
 fi
 
+# Android OS version mapping for mkbootimg
+# Determines os_version and os_patch_level used in the boot image header
+case "${ANDROID_VER:-14}" in
+    16) OS_VERSION=16.0.0; OS_PATCH_LEVEL=2025-06 ;;
+    15) OS_VERSION=15.0.0; OS_PATCH_LEVEL=2025-05 ;;
+    *)  OS_VERSION=14.0.0; OS_PATCH_LEVEL=2025-01 ;;
+esac
+
+echo "-----------------------------------------------"
+echo "Android target: ${ANDROID_VER:-14} → os_version=$OS_VERSION, os_patch_level=$OS_PATCH_LEVEL"
+echo "-----------------------------------------------"
+
 rm -rf build/out/$MODEL
 mkdir -p build/out/$MODEL/zip/files
 mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
@@ -209,26 +222,12 @@ fi
 
 echo "-----------------------------------------------"
 echo "Building kernel using "$KERNEL_DEFCONFIG""
-# ── Advanced compiler optimizations ─────────────────────────────────────
-# -O3                        : overrides -O2; aggressive inlining + vectorization
-# -march=armv8.2-a+crypto+crc: Exynos 9825 hardware AES/SHA/CRC32
-# -mtune=cortex-a75          : instruction scheduling for the big core
-# -fno-semantic-interposition: cross-TU inlining without LTO compile-time cost
-# -fmerge-all-constants      : deduplicate string/data constants → smaller I-cache footprint
-# NOTE: -fno-plt removed — it conflicts with the host linker (collect2) when the
-#       cross-toolchain bin/ dir is in PATH, causing fixdep link failures.
-# NOTE: Polly sub-options (-polly-vectorizer=stripmine etc.) are intentionally NOT used.
-# The Samsung kernel Makefile's cc-option() tests split KCFLAGS word-by-word, so
-# "-mllvm -polly-vectorizer=stripmine" becomes two separate tests. "-polly-vectorizer=stripmine"
-# alone (without -mllvm prefix) is invalid → prepare-compiler-check fails at Makefile:1375.
-# Only the base "-mllvm -polly" pair is safe here.
 KCFLAGS_EXTRA="-O3"
 KCFLAGS_EXTRA+=" -march=armv8.2-a+crypto+crc"
 KCFLAGS_EXTRA+=" -mtune=cortex-a75"
 KCFLAGS_EXTRA+=" -fno-semantic-interposition"
 KCFLAGS_EXTRA+=" -fmerge-all-constants"
 
-# Polly base probe — safe with the kernel Makefile's cc-option() word-split mechanism.
 if echo "int f(void){return 0;}" | clang -mllvm -polly -c -x c - -o /dev/null 2>/dev/null; then
   echo "Polly available — enabling polyhedral loop optimizer"
   KCFLAGS_EXTRA+=" -mllvm -polly"
@@ -259,18 +258,13 @@ BASE=0x10000000
 CMDLINE='loop.max_part=7'
 HASHTYPE=sha1
 HEADER_VERSION=1
-OS_PATCH_LEVEL=2025-01
-OS_VERSION=14.0.0
 PAGESIZE=2048
 RAMDISK=build/out/$MODEL/ramdisk.cpio.gz
 OUTPUT_FILE=build/out/$MODEL/boot.img
 
-## Build auxiliary boot.img files
-# Copy kernel to build
 cp out/arch/arm64/boot/Image build/out/$MODEL
 
 echo "-----------------------------------------------"
-# Build dtb
 if [[ "$SOC" == "exynos9820" ]]; then
     echo "Building common exynos9820 Device Tree Blob Image..."
     echo "-----------------------------------------------"
@@ -284,14 +278,12 @@ if [[ "$SOC" == "exynos9825" ]]; then
 fi
 echo "-----------------------------------------------"
 
-# Build dtbo
 echo "Building Device Tree Blob Output Image for "$MODEL"..."
 echo "-----------------------------------------------"
 ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img build/dtconfigs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung
 echo "-----------------------------------------------"
 
 if [ -z "$RECOVERY" ]; then
-    # Build ramdisk
     echo "Building RAMDisk..."
     echo "-----------------------------------------------"
     pushd build/ramdisk > /dev/null
@@ -299,8 +291,7 @@ if [ -z "$RECOVERY" ]; then
     popd > /dev/null
     echo "-----------------------------------------------"
 
-    # Create boot image
-    echo "Creating boot image..."
+    echo "Creating boot image (Android $OS_VERSION)..."
     echo "-----------------------------------------------"
     ./toolchain/mkbootimg --base $BASE --board $BOARD --cmdline "$CMDLINE" --hashtype $HASHTYPE \
     --header_version $HEADER_VERSION --kernel $KERNEL_PATH --kernel_offset $KERNEL_OFFSET \
@@ -308,7 +299,6 @@ if [ -z "$RECOVERY" ]; then
     --ramdisk $RAMDISK --ramdisk_offset $RAMDISK_OFFSET --second_offset $SECOND_OFFSET \
     --tags_offset $TAGS_OFFSET -o $OUTPUT_FILE || abort
 
-    # Build zip
     echo "Building zip..."
     echo "-----------------------------------------------"
     cp build/out/$MODEL/boot.img build/out/$MODEL/zip/files/boot.img
@@ -318,7 +308,6 @@ if [ -z "$RECOVERY" ]; then
     cp build/updater-script build/out/$MODEL/zip/META-INF/com/google/android/updater-script
 
     pushd build/out/$MODEL/zip > /dev/null
-
     zip -r ../ExtremeKRNL-Nexus-"$MODEL".zip .
     popd > /dev/null
 fi
