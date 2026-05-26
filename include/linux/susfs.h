@@ -26,11 +26,11 @@
 /* ENUM */
 /********/
 enum UID_SCHEME {
-	UID_NON_APP_PROC = 0,
-	UID_ROOT_PROC_EXCEPT_SU_PROC,
-	UID_NON_SU_PROC,
-	UID_UMOUNTED_APP_PROC,
-	UID_UMOUNTED_PROC,
+        UID_NON_APP_PROC = 0,
+        UID_ROOT_PROC_EXCEPT_SU_PROC,
+        UID_NON_SU_PROC,
+        UID_UMOUNTED_APP_PROC,
+        UID_UMOUNTED_PROC,
 };
 
 /**********/
@@ -39,22 +39,22 @@ enum UID_SCHEME {
 /* sus_path */
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 struct st_susfs_sus_path {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                                     err;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        int                                     err;
 };
 
 struct st_susfs_sus_path_list {
-	struct list_head                        list;
-	struct st_susfs_sus_path                info;
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        struct list_head                        list;
+        struct st_susfs_sus_path                info;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
 };
 #endif
 
 /* sus_mount */
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 struct st_susfs_hide_sus_mnts_for_non_su_procs {
-	bool                                    enabled;
-	int                                     err;
+        bool                                    enabled;
+        int                                     err;
 };
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
@@ -74,125 +74,125 @@ struct st_susfs_hide_sus_mnts_for_non_su_procs {
 #define KSTAT_SPOOF_BLKSIZE (1 << 11)
 
 struct st_susfs_sus_kstat {
-	int                                     is_statically;
-	unsigned long                           target_ino;
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	unsigned long                           spoofed_ino;
-	unsigned long                           spoofed_dev;
-	unsigned int                            spoofed_nlink;
-	long long                               spoofed_size;
-	long                                    spoofed_atime_tv_sec;
-	unsigned long                           spoofed_atime_tv_nsec;
-	long                                    spoofed_mtime_tv_sec;
-	unsigned long                           spoofed_mtime_tv_nsec;
-	long                                    spoofed_ctime_tv_sec;
-	unsigned long                           spoofed_ctime_tv_nsec;
-	long long                               spoofed_blocks;
-	long                                    spoofed_blksize;
-	int                                     flags;
-	int                                     err;
+        int                                     is_statically;
+        unsigned long                           target_ino;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        unsigned long                           spoofed_ino;
+        unsigned long                           spoofed_dev;
+        unsigned int                            spoofed_nlink;
+        long long                               spoofed_size;
+        long                                    spoofed_atime_tv_sec;
+        unsigned long                           spoofed_atime_tv_nsec;
+        long                                    spoofed_mtime_tv_sec;
+        unsigned long                           spoofed_mtime_tv_nsec;
+        long                                    spoofed_ctime_tv_sec;
+        unsigned long                           spoofed_ctime_tv_nsec;
+        long long                               spoofed_blocks;
+        long                                    spoofed_blksize;
+        int                                     flags;
+        int                                     err;
 };
 
 struct st_susfs_sus_kstat_hlist {
-	unsigned long                           target_ino;
-	unsigned long                           target_dev;
-	bool                                    is_fuse;
-	struct st_susfs_sus_kstat               info;
-	struct hlist_node                       node;
+        unsigned long                           target_ino;
+        unsigned long                           target_dev;
+        bool                                    is_fuse;
+        struct st_susfs_sus_kstat               info;
+        struct hlist_node                       node;
 };
 #endif
 
 /* try_umount */
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 struct st_susfs_try_umount {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                                     mnt_mode;
-	int                                     err;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        int                                     mnt_mode;
+        int                                     err;
 };
 
 struct st_susfs_try_umount_list {
-	struct list_head                        list;
-	struct st_susfs_try_umount              info;
+        struct list_head                        list;
+        struct st_susfs_try_umount              info;
 };
 #endif
 
 /* spoof_uname */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 struct st_susfs_uname {
-	char                                    release[__NEW_UTS_LEN+1];
-	char                                    version[__NEW_UTS_LEN+1];
-	int                                     err;
+        char                                    release[__NEW_UTS_LEN+1];
+        char                                    version[__NEW_UTS_LEN+1];
+        int                                     err;
 };
 #endif
 
 /* enable_log */
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 struct st_susfs_log {
-	bool                                    enabled;
-	int                                     err;
+        bool                                    enabled;
+        int                                     err;
 };
 #endif
 
 /* spoof_cmdline_or_bootconfig */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 struct st_susfs_spoof_cmdline_or_bootconfig {
-	char                                    fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
-	int                                     err;
+        char                                    fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
+        int                                     err;
 };
 #endif
 
 /* open_redirect */
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 struct st_susfs_open_redirect {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	char                                    redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                                     uid_scheme;
-	int                                     err;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        char                                    redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
+        int                                     uid_scheme;
+        int                                     err;
 };
 
 struct st_susfs_open_redirect_hlist {
-	unsigned long                           target_ino;
-	unsigned long                           target_dev;
-	unsigned long                           redirected_ino;
-	unsigned long                           redirected_dev;
-	int                                     spoofed_mnt_id;
-	struct kstatfs                          spoofed_kstatfs;
-	struct st_susfs_open_redirect           info;
-	bool                                    reversed_lookup_only;
-	struct hlist_node                       node;
+        unsigned long                           target_ino;
+        unsigned long                           target_dev;
+        unsigned long                           redirected_ino;
+        unsigned long                           redirected_dev;
+        int                                     spoofed_mnt_id;
+        struct kstatfs                          spoofed_kstatfs;
+        struct st_susfs_open_redirect           info;
+        bool                                    reversed_lookup_only;
+        struct hlist_node                       node;
 };
 #endif
 
 /* sus_map */
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 struct st_susfs_sus_map {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                                     err;
+        char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+        int                                     err;
 };
 #endif
 
 /* avc log spoofing */
 struct st_susfs_avc_log_spoofing {
-	bool                                    enabled;
-	int                                     err;
+        bool                                    enabled;
+        int                                     err;
 };
 
 /* get enabled features */
 struct st_susfs_enabled_features {
-	char                                    enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
-	int                                     err;
+        char                                    enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
+        int                                     err;
 };
 
 /* show variant */
 struct st_susfs_variant {
-	char                                    susfs_variant[16];
-	int                                     err;
+        char                                    susfs_variant[16];
+        int                                     err;
 };
 
 /* show version */
 struct st_susfs_version {
-	char                                    susfs_version[16];
-	int                                     err;
+        char                                    susfs_version[16];
+        int                                     err;
 };
 
 /***********************/
@@ -249,6 +249,7 @@ void susfs_add_sus_map(void __user **user_info);
 #endif
 
 void susfs_set_avc_log_spoofing(void __user **user_info);
+extern bool susfs_is_avc_log_spoofing_enabled;
 
 void susfs_get_enabled_features(void __user **user_info);
 void susfs_show_variant(void __user **user_info);
