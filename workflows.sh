@@ -290,7 +290,7 @@ else { console.log('SukiSU patch 5: patterns not found in patch_memory.c'); }
 
         # Fix 6: file_wrapper.c — multiple struct file_operations fields absent on kernel 4.14
         # __poll_t (4.16+), iopoll (5.1+), remap_file_range/REMAP_FILE_DEDUP (4.20+), fadvise/mmap_supported_flags (5.0+)
-        FWRAP="${MANAGER_DIR}/kernel/infra/file_wrapper.c"
+        FWRAP="drivers/kernelsu/infra/file_wrapper.c"
         if [ -f "$FWRAP" ]; then
             node -e "
 const fs = require('fs');
