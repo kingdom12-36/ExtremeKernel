@@ -361,7 +361,6 @@ fs.writeFileSync(FWRAP, c);
 console.log('SukiSU patch 6: file_wrapper.c 4.14 compat fixed (' + n + ' replacements)');
 FWPATCH
         node /tmp/ksu_fw_patch.js
-        fi
     fi
 fi
 
