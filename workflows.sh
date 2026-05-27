@@ -290,102 +290,77 @@ else { console.log('SukiSU patch 5: patterns not found in patch_memory.c'); }
 
         # Fix 6: file_wrapper.c — multiple struct file_operations fields absent on kernel 4.14
         # __poll_t (4.16+), iopoll (5.1+), remap_file_range/REMAP_FILE_DEDUP (4.20+), fadvise/mmap_supported_flags (5.0+)
-        FWRAP="drivers/kernelsu/infra/file_wrapper.c"
-        if [ -f "$FWRAP" ]; then
-            node -e "
+        cat > /tmp/ksu_fw_patch.js << 'FWPATCH'
 const fs = require('fs');
-let c = fs.readFileSync('${FWRAP}','utf8');
-let changed = 0;
+const FWRAP = 'SukiSU/kernel/infra/file_wrapper.c';
+if (!fs.existsSync(FWRAP)) { console.log('SukiSU patch 6: file_wrapper.c not found at', FWRAP); process.exit(0); }
+let c = fs.readFileSync(FWRAP, 'utf8');
+let n = 0;
 
-// Fix a: __poll_t undefined on < 4.16
-const INC_VER = '#include <linux/version.h>';
-const POLLT = INC_VER + '
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
-typedef unsigned int __poll_t;
-#endif';
-if (c.includes(INC_VER) && !c.includes('typedef unsigned int __poll_t')) { c = c.replace(INC_VER, POLLT); changed++; }
-
-// Fix b: iopoll function — #else -> #elif >= 5.1 (iopoll absent on 4.14)
-c = c.replace(
-  '#else
-static int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)',
-  '#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
-static int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)'
-); changed++;
-
-// Fix c: iopoll assignment — guard with >= 5.1
-c = c.replace(
-  '    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;',
-  '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
-    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;
-#endif'
-); changed++;
-
-// Fix d: mmap_supported_flags — change #else -> #elif >= 5.0
-c = c.replace(
-  '#else
-    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;
-#endif',
-  '#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;
-#endif'
-); changed++;
-
-// Fix e: remap_file_range + fadvise assignments — guard separately
-c = c.replace(
-  '    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
-    p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;',
-  '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
-#endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-    p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;
-#endif'
-); changed++;
-
-// Fix f: wrap remap_file_range function definition with >= 4.20
-const REMAP_FN_START = 'static loff_t ksu_wrapper_remap_file_range(';
-if (c.includes(REMAP_FN_START) && !c.includes('#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-static loff_t')) {
-  const REMAP_FN_END = '
+// Fix a: add __poll_t typedef for kernel < 4.16
+if (c.includes('#include <linux/version.h>') && !c.includes('typedef unsigned int __poll_t')) {
+  c = c.replace('#include <linux/version.h>',
+    '#include <linux/version.h>\n#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)\ntypedef unsigned int __poll_t;\n#endif');
+  n++;
 }
 
-static int ksu_wrapper_fadvise(';
-  const si = c.indexOf(REMAP_FN_START);
-  const ei = c.indexOf(REMAP_FN_END, si);
-  if (si > 0 && ei > si) {
-    c = c.slice(0, si) + '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-' +
-        c.slice(si, ei + 3) + '
-#endif
-' + c.slice(ei + 3);
-    changed++;
+// Fix b: guard iopoll function #else -> #elif >= 5.1 (iopoll absent on 4.14)
+if (c.includes('#else\nstatic int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)')) {
+  c = c.replace('#else\nstatic int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)',
+    '#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\nstatic int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)');
+  n++;
+}
+
+// Fix c: guard iopoll struct assignment >= 5.1
+if (c.includes('    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;')) {
+  c = c.replace('    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;',
+    '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;\n#endif');
+  n++;
+}
+
+// Fix d: guard mmap_supported_flags — restrict #else to >= 5.0
+if (c.includes('#else\n    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;\n#endif')) {
+  c = c.replace('#else\n    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;\n#endif',
+    '#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;\n#endif');
+  n++;
+}
+
+// Fix e: guard remap_file_range + fadvise assignments
+const OLD_REMAP = '    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n    p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;';
+if (c.includes(OLD_REMAP)) {
+  c = c.replace(OLD_REMAP,
+    '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)\n    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n#endif\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n    p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;\n#endif');
+  n++;
+}
+
+// Fix f: wrap remap_file_range function definition >= 4.20
+const RF_START = 'static loff_t ksu_wrapper_remap_file_range(';
+const RF_GUARD = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)\nstatic loff_t ksu_wrapper_remap_file_range(';
+if (c.includes(RF_START) && !c.includes(RF_GUARD)) {
+  const si2 = c.indexOf(RF_START);
+  const ei2 = c.indexOf('\n}\n\nstatic int ksu_wrapper_fadvise(', si2);
+  if (si2 > 0 && ei2 > si2) {
+    c = c.slice(0, si2) + '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)\n' +
+        c.slice(si2, ei2 + 3) + '\n#endif\n' + c.slice(ei2 + 3); n++;
   }
 }
 
-// Fix g: wrap fadvise function definition with >= 5.0
-const FADV_FN_START = 'static int ksu_wrapper_fadvise(struct file *fp,';
-if (c.includes(FADV_FN_START) && !c.includes('#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-static int ksu_wrapper_fadvise(')) {
-  const FADV_FN_END = '
-}
-
-static void ksu_release_file_wrapper(';
-  const si = c.indexOf(FADV_FN_START);
-  const ei = c.indexOf(FADV_FN_END, si);
-  if (si > 0 && ei > si) {
-    c = c.slice(0, si) + '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-' +
-        c.slice(si, ei + 3) + '
-#endif
-' + c.slice(ei + 3);
-    changed++;
+// Fix g: wrap fadvise function definition >= 5.0
+const FA_START = 'static int ksu_wrapper_fadvise(struct file *fp,';
+const FA_GUARD = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\nstatic int ksu_wrapper_fadvise(';
+if (c.includes(FA_START) && !c.includes(FA_GUARD)) {
+  const si3 = c.indexOf(FA_START);
+  const ei3 = c.indexOf('\n}\n\nstatic void ksu_release_file_wrapper(', si3);
+  if (si3 > 0 && ei3 > si3) {
+    c = c.slice(0, si3) + '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n' +
+        c.slice(si3, ei3 + 3) + '\n#endif\n' + c.slice(ei3 + 3); n++;
   }
 }
 
-fs.writeFileSync('${FWRAP}', c);
-console.log('SukiSU patch 6: file_wrapper.c 4.14 compat fixed (' + changed + ' replacements)');
-"
+fs.writeFileSync(FWRAP, c);
+console.log('SukiSU patch 6: file_wrapper.c 4.14 compat fixed (' + n + ' replacements)');
+FWPATCH
+        node /tmp/ksu_fw_patch.js
         fi
     fi
 fi
