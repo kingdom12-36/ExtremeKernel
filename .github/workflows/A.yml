@@ -109,7 +109,8 @@ jobs:
             check "kvcalloc (kernel<4.15)"              "\bkvcalloc\b"
             check "kvmalloc_array (kernel<4.12)"        "\bkvmalloc_array\b"
             check "SECCOMP_ARCH_NATIVE_NR (kernel<5.8)" "\bSECCOMP_ARCH_NATIVE_NR\b"
-            check "__pte_to_phys (no compat define)"    "\b__pte_to_phys\b"
+            check "uapi/linux/mount.h (kernel<5.8)"     "uapi/linux/mount\.h"
+            check "__pte_to_phys (needs compat define)" "\b__pte_to_phys\b"
             check "ksu_handle_* implicit decls"         "\bksu_handle_\w+"
           fi
           echo ""
@@ -125,7 +126,6 @@ jobs:
           echo "=================================================================="
           PATCHED=0
 
-          # Directories to scan for submodule driver files
           DIRS=()
           [ -d "${{ matrix.submodule }}/kernel" ] && DIRS+=("${{ matrix.submodule }}/kernel")
           [ -d "drivers/kernelsu"               ] && DIRS+=("drivers/kernelsu")
@@ -179,7 +179,6 @@ jobs:
             fi
 
             # ── FIX: SECCOMP_ARCH_NATIVE_NR (kernel 5.8+) ─────────────────────
-            # Wrap all code after includes with #ifdef guard + empty stubs
             if grep -qE "\bSECCOMP_ARCH_NATIVE_NR\b" "$f" 2>/dev/null && \
                ! grep -q "ifdef SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null; then
               echo "  [SECCOMP_ARCH_NATIVE_NR] $f"
@@ -203,8 +202,13 @@ jobs:
               CHANGED=1
             fi
 
+            # ── FIX: uapi/linux/mount.h → linux/mount.h  (split in kernel 5.8) ─
+            if grep -q "uapi/linux/mount.h" "$f" 2>/dev/null; then
+              sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>|g' "$f"
+              echo "  [uapi/mount.h] $f"; CHANGED=1
+            fi
+
             # ── FIX: __pte_to_phys compat define (not in kernel 4.14 ARM64) ───
-            # After adding pgtable.h, inject compat #define if not already defined
             if grep -qE "\b__pte_to_phys\b" "$f" 2>/dev/null && \
                ! grep -q "define __pte_to_phys\|ifndef __pte_to_phys" "$f" 2>/dev/null; then
               if ! grep -qE "#include.*pgtable" "$f" 2>/dev/null; then
@@ -248,20 +252,16 @@ jobs:
           done
 
           # ── FIX: ksu_handle_* implicit declarations in BASE kernel .c files ──
-          # These are kernel source files patched by the manager to call ksu hooks
-          # but without including the forward declaration header.
           echo "--- Scanning base kernel source for ksu_handle_* implicit decls ---"
           while IFS= read -r f; do
             FUNCS=$(grep -oE '\bksu_handle_[a-zA-Z0-9_]+\b' "$f" 2>/dev/null | sort -u || true)
             [ -z "$FUNCS" ] && continue
             KCHANGED=0
             for FUNC in $FUNCS; do
-              # Skip if already declared or defined
               if grep -qE "extern[^;]*\b${FUNC}\b|void\s+${FUNC}\s*\(" "$f" 2>/dev/null; then
                 continue
               fi
               echo "  [ksu_handle decl: $FUNC] $f"
-              # Insert extern declaration after the last #include line
               awk -v func="$FUNC" '
                 /^#include/ { lastinc = NR }
                 { lines[NR] = $0 }
@@ -299,12 +299,14 @@ jobs:
             echo "$BAD"; exit 1
           fi
 
-          # Verify SECCOMP guard applied to every file that references the constant
           for SEARCH_DIR in "${DIRS[@]}"; do
             while IFS= read -r f; do
               if grep -q "SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null && \
                  ! grep -q "ifdef SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null; then
                 echo "::error::SECCOMP guard missing in $f"; exit 1
+              fi
+              if grep -q "uapi/linux/mount.h" "$f" 2>/dev/null; then
+                echo "::error::uapi/mount.h still present in $f"; exit 1
               fi
             done < <(find "$SEARCH_DIR" -name "*.c" 2>/dev/null)
           done
