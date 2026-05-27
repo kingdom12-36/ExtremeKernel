@@ -445,29 +445,43 @@ echo "-----------------------------------------------"
     echo "Applying smart compatibility patches for KernelSU..."
 
         # ── Smart compatibility patches only for SukiSU ───────────────────────────
+        # ── Smart compatibility patches only for SukiSU ───────────────────────────
     if [[ "${MANAGER_DIR}" == "SukiSU" ]]; then
         echo "SukiSU detected — Applying smart compatibility patches..."
 
+        # 1. Fix event_queue.h (Missing poll/event types)
         EQ_H="drivers/kernelsu/infra/event_queue.h"
         if [ -f "$EQ_H" ] && ! grep -q "linux/poll.h" "$EQ_H"; then
             sed -i '/#include </a #include <linux/poll.h>\n#include <uapi/linux/eventpoll.h>' "$EQ_H"
             echo " -> [SUCCESS] Smart patched event_queue.h"
         fi
 
+        # 2. Fix patch_memory.c (Missing arm64 page table macro)
         PM_C="drivers/kernelsu/hook/arm64/patch_memory.c"
         if [ -f "$PM_C" ] && ! grep -q "asm/pgtable.h" "$PM_C" && ! grep -q "linux/pgtable.h" "$PM_C"; then
             sed -i '/#include </a #include <asm/pgtable.h>' "$PM_C"
             echo " -> [SUCCESS] Smart patched patch_memory.c"
         fi
 
+        # 3. Fix sucompat.c (strncpy_from_user_nofault is absent on 4.14)
+        SU_C="drivers/kernelsu/feature/sucompat.c"
+        if [ -f "$SU_C" ] && ! grep -q "probe_kernel_read" "$SU_C"; then
+            sed -i '1i #define strncpy_from_user_nofault(dst, src, count) probe_kernel_read(dst, src, count)' "$SU_C"
+            echo " -> [SUCCESS] Smart patched sucompat.c wrapper"
+        fi
+
+        # 4. Fix file_wrapper.c (Fix missing type definitions without breaking headers)
         FW_C="drivers/kernelsu/infra/file_wrapper.c"
-        if [ -f "$FW_C" ] && ! grep -q "security/selinux/objsec.h" "$FW_C"; then
-            sed -i '/#include </a #include <security/selinux/objsec.h>' "$FW_C"
-            echo " -> [SUCCESS] Smart patched file_wrapper.c"
+        if [ -f "$FW_C" ] && ! grep -q "struct inode_security_struct" "$FW_C"; then
+            # Injecting inline forward declaration to avoid "security/selinux/objsec.h file not found"
+            sed -i '/#include </a struct inode_security_struct { void *garbage; };\nextern void *selinux_inode(const struct inode *inode);' "$FW_C"
+            echo " -> [SUCCESS] Smart patched file_wrapper.c definitions"
         fi
     else
         echo "Manager is ${MANAGER_DIR} — Skipping SukiSU compatibility patches."
     fi
+    # ──────────────────────────────────────────────────────────────────────────
+
     # ──────────────────────────────────────────────────────────────────────────
 
 echo "Generating configuration file..."
