@@ -1,0 +1,166 @@
+name: Fast Scan - Pre-build Issue Detector
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    name: Scan (${{ matrix.manager }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        manager: [ksun, ksu, sukisu]
+        include:
+          - manager: ksun
+            submodule: KernelSU-Next
+          - manager: ksu
+            submodule: KernelSU
+          - manager: sukisu
+            submodule: SukiSU
+
+    steps:
+      - name: Checkout source (shallow — no toolchain needed)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Sync ${{ matrix.submodule }} submodule only
+        run: |
+          git submodule sync "${{ matrix.submodule }}"
+          git submodule update --init --depth=1 "${{ matrix.submodule }}"
+
+      - name: Fast static scan
+        id: scan
+        run: |
+          echo "==================================================================="
+          echo " FAST SCAN — Manager: ${{ matrix.manager }} | $(date -u)"
+          echo "==================================================================="
+
+          ERRORS=0
+          WARNS=0
+
+          # ── helpers ──────────────────────────────────────────────────────────
+          check_error() {
+            local label="$1"; local pattern="$2"; local dir="${3:-drivers/kernelsu/}"
+            echo ""
+            echo ">>> $label"
+            local hits
+            hits=$(grep -rn -E "$pattern" "$dir" 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "  ERROR: $label — will cause build failure:"
+              echo "$hits" | sed 's/^/    /'
+              ERRORS=$((ERRORS+1))
+              return 1
+            fi
+            echo "  OK"
+            return 0
+          }
+
+          check_warn() {
+            local label="$1"; local pattern="$2"; local dir="${3:-drivers/kernelsu/}"
+            echo ""
+            echo ">>> $label"
+            local hits
+            hits=$(grep -rn -E "$pattern" "$dir" 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "  WARN: $label — non-fatal but review recommended:"
+              echo "$hits" | sed 's/^/    /'
+              WARNS=$((WARNS+1))
+            else
+              echo "  OK"
+            fi
+          }
+
+          # ── Error checks (will break the build) ──────────────────────────────
+          check_error \
+            "__poll_t not available in kernel < 4.16" \
+            "\b__poll_t\b"
+
+          check_error \
+            "EPOLL* constants not available in kernel < 4.16 (use POLL* instead)" \
+            "\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b|\bEPOLLPRI\b"
+
+          check_error \
+            "kvmalloc_array not available in kernel < 4.12" \
+            "\bkvmalloc_array\b"
+
+          check_error \
+            "kvcalloc not available in kernel < 4.15" \
+            "\bkvcalloc\b"
+
+          check_error \
+            "loff_t used without <linux/types.h>" \
+            "\bloff_t\b" "drivers/kernelsu/" || true   # just a warn pattern, errors handled above
+
+          # ── Warning checks (implicit declarations / missing headers) ──────────
+          check_warn \
+            "strncpy_from_user — check #include <linux/uaccess.h>" \
+            "\bstrncpy_from_user\b"
+
+          check_warn \
+            "__pte_to_phys — check #include <asm/pgtable.h>" \
+            "\b__pte_to_phys\b"
+
+          check_warn \
+            "selinux_inode — availability depends on kernel version / SELinux config" \
+            "\bselinux_inode\b"
+
+          check_warn \
+            "access_ok 2-argument form (kernel >= 5.0 dropped the 'type' arg)" \
+            "access_ok\s*\(\s*(VERIFY_READ|VERIFY_WRITE)"
+
+          check_warn \
+            "set_fs / get_fs removed in kernel 5.10+" \
+            "\bset_fs\b|\bget_fs\b"
+
+          # ── Kbuild completeness check ─────────────────────────────────────────
+          echo ""
+          echo ">>> Checking .c files are referenced in their Makefile/Kbuild"
+          UNBUILD=0
+          while IFS= read -r src; do
+            base=$(basename "$src" .c)
+            dir=$(dirname "$src")
+            # obj-y += foo.o  OR  foo-objs += ...
+            if ! grep -qE "(^|\s)${base}[.\-]" "$dir/Makefile" "$dir/Kbuild" 2>/dev/null; then
+              echo "  WARN: $src not referenced in $dir/Makefile or $dir/Kbuild"
+              UNBUILD=$((UNBUILD+1))
+            fi
+          done < <(find drivers/kernelsu/ -name "*.c" 2>/dev/null)
+          if [ "$UNBUILD" -eq 0 ]; then
+            echo "  OK — all .c files are referenced"
+          else
+            WARNS=$((WARNS+UNBUILD))
+          fi
+
+          # ── Defconfig presence check ──────────────────────────────────────────
+          echo ""
+          echo ">>> Checking defconfigs exist"
+          for cfg in arch/arm64/configs/exynos9820-d2s_defconfig \
+                     arch/arm64/configs/d2s_defconfig \
+                     arch/arm64/configs/d2s-perf_defconfig; do
+            if [ -f "$cfg" ]; then
+              echo "  OK: $cfg"
+            else
+              echo "  (not found — may be expected): $cfg"
+            fi
+          done
+
+          # ── Summary ──────────────────────────────────────────────────────────
+          echo ""
+          echo "==================================================================="
+          echo " SCAN SUMMARY — ${{ matrix.manager }}"
+          echo "  Errors  : $ERRORS  ← build-breaking"
+          echo "  Warnings: $WARNS   ← review recommended"
+          echo "==================================================================="
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::[${{ matrix.manager }}] $ERRORS build-breaking issue(s) found. See log above."
+            exit 1
+          fi
+          if [ "$WARNS" -gt 0 ]; then
+            echo "::warning::[${{ matrix.manager }}] $WARNS warning(s). Non-fatal — review when convenient."
+          fi
+          echo "All checks passed for ${{ matrix.manager }}."
