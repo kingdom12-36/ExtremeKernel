@@ -229,7 +229,7 @@ if (c.includes(OLD)) {
         # On 4.14, pgtable symbols come from asm/pgtable.h (via linux/mm.h).
         # Scan all SukiSU .c/.h files and replace the include with a version guard.
         find "${MANAGER_DIR}/kernel" \( -name "*.c" -o -name "*.h" \) | xargs grep -l "linux/pgtable.h" 2>/dev/null | while read PGTF; do
-            sed -i 's|#include <linux/pgtable.h>|#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)\n#include <linux/pgtable.h>\n#else\n#include <asm/pgtable.h>\n#endif|' "${PGTF}"
+            sed -i 's|#include <linux/pgtable.h>|#ifndef LINUX_VERSION_CODE\n#include <linux/version.h>\n#endif\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)\n#include <linux/pgtable.h>\n#else\n#include <asm/pgtable.h>\n#endif|' "${PGTF}"
             echo "SukiSU patch 3: pgtable.h guarded in ${PGTF}"
         done
     fi
