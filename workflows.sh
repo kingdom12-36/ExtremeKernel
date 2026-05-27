@@ -162,7 +162,13 @@ if [ -z $KSU_OPTION ]; then
 fi
 
 if [[ "${KSU_OPTION,,}" == "y" ]]; then
-    KSU=ksu.config
+    # SukiSU Kconfig declares "depends on KPROBES" — without CONFIG_KPROBES=y
+    # the resolver silently drops CONFIG_KSU and SukiSU never initialises.
+    # sukisu.config enables KPROBES; ksu.config uses KSUN manual-hooks.
+    case "${MANAGER:-ksun}" in
+        sukisu) KSU=sukisu.config ;;
+        *)      KSU=ksu.config    ;;
+    esac
     # Select manager submodule dir and re-point drivers/kernelsu symlink
     case "${MANAGER:-ksun}" in
         ksu)    MANAGER_DIR="KernelSU" ;;
