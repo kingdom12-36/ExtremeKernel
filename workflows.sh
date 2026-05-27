@@ -441,8 +441,30 @@ MAKE_FLAGS+=("KCFLAGS=${KCFLAGS_EXTRA}")
 echo "-----------------------------------------------"
 echo "Advanced flags: ${KCFLAGS_EXTRA}"
 echo "-----------------------------------------------"
+    # ── Smart compatibility patches for KernelSU on 4.14 kernels ──────────────
+    echo "Applying smart compatibility patches for KernelSU..."
+
+    EQ_H="drivers/kernelsu/infra/event_queue.h"
+    if [ -f "$EQ_H" ] && ! grep -q "linux/poll.h" "$EQ_H"; then
+        sed -i '/#include </a #include <linux/poll.h>\n#include <uapi/linux/eventpoll.h>' "$EQ_H"
+        echo " -> [SUCCESS] Smart patched event_queue.h"
+    fi
+
+    PM_C="drivers/kernelsu/hook/arm64/patch_memory.c"
+    if [ -f "$PM_C" ] && ! grep -q "asm/pgtable.h" "$PM_C" && ! grep -q "linux/pgtable.h" "$PM_C"; then
+        sed -i '/#include </a #include <asm/pgtable.h>' "$PM_C"
+        echo " -> [SUCCESS] Smart patched patch_memory.c"
+    fi
+
+    FW_C="drivers/kernelsu/infra/file_wrapper.c"
+    if [ -f "$FW_C" ] && ! grep -q "security/selinux/objsec.h" "$FW_C"; then
+        sed -i '/#include </a #include <security/selinux/objsec.h>' "$FW_C"
+        echo " -> [SUCCESS] Smart patched file_wrapper.c"
+    fi
+    # ──────────────────────────────────────────────────────────────────────────
 
 echo "Generating configuration file..."
+
 echo "-----------------------------------------------"
 make "${MAKE_FLAGS[@]}" -j$CORES exynos9820_defconfig $MODEL.config $KSU $RECOVERY || abort
 
