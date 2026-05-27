@@ -294,7 +294,7 @@ else { console.log('SukiSU patch 5: patterns not found in patch_memory.c'); }
         if [ -f "$FWRAP" ]; then
             node -e "
 const fs = require('fs');
-let c = fs.readFileSync(process.env.FWRAP,'utf8');
+let c = fs.readFileSync('${FWRAP}','utf8');
 let changed = 0;
 
 // Fix a: __poll_t undefined on < 4.16
@@ -383,9 +383,9 @@ static void ksu_release_file_wrapper(';
   }
 }
 
-fs.writeFileSync(process.env.FWRAP, c);
+fs.writeFileSync('${FWRAP}', c);
 console.log('SukiSU patch 6: file_wrapper.c 4.14 compat fixed (' + changed + ' replacements)');
-" FWRAP="$FWRAP"
+"
         fi
     fi
 fi
