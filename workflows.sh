@@ -232,6 +232,37 @@ if (c.includes(OLD)) {
             sed -i 's|#include <linux/pgtable.h>|#ifndef LINUX_VERSION_CODE\n#include <linux/version.h>\n#endif\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)\n#include <linux/pgtable.h>\n#else\n#include <asm/pgtable.h>\n#endif|' "${PGTF}"
             echo "SukiSU patch 3: pgtable.h guarded in ${PGTF}"
         done
+
+        # Fix 4: lsm_hook.c type mismatches on kernel 4.14
+        # On 4.14: security_hook_list.list is list_head (not hlist_node),
+        # and security_hook_list.head is list_head* (not hlist_head*).
+        # These code paths are unreachable with CONFIG_KSU_MANUAL_HOOK=y on 4.14.
+        LSM_HOOK="${MANAGER_DIR}/kernel/hook/lsm_hook.c"
+        if [ -f "$LSM_HOOK" ]; then
+            node -e "
+const fs = require('fs');
+let c = fs.readFileSync('${LSM_HOOK}', 'utf8');
+let changed = false;
+
+// Fix a: hook->list.head = head (list_head* <- hlist_head* type mismatch)
+const OLD_A = 'hook->list.head = head;';
+const NEW_A = 'hook->list.head = (struct list_head *)(void *)head;';
+if (c.includes(OLD_A)) { c = c.replace(OLD_A, NEW_A); changed = true; }
+
+// Fix b: hook->list.list.pprev does not exist on struct list_head in 4.14
+const OLD_B = 'hook->list.list.pprev = &head->first;';
+const NEW_B = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n                    hook->list.list.pprev = &head->first;\n#else\n                    /* 4.14: list_head has no pprev; manual hooks used */\n                    (void)head;\n#endif';
+if (c.includes(OLD_B)) { c = c.replace(OLD_B, NEW_B); changed = true; }
+
+// Fix c: hook->list.head->first — list_head has no .first member
+const OLD_C = 'slot = (void **)&hook->list.head->first;';
+const NEW_C = 'slot = (void **)&((struct hlist_head *)(void *)hook->list.head)->first;';
+if (c.includes(OLD_C)) { c = c.replace(OLD_C, NEW_C); changed = true; }
+
+if (changed) { fs.writeFileSync('${LSM_HOOK}', c); console.log('SukiSU patch 4: lsm_hook.c 4.14 type compat fixed'); }
+else { console.log('SukiSU patch 4: no patterns found in lsm_hook.c'); }
+"
+        fi
     fi
 fi
 
