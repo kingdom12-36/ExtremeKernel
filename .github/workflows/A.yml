@@ -26,7 +26,6 @@ jobs:
             version_offset: 200
 
     name: Build (${{ matrix.manager }})
-
     permissions:
       contents: read
 
@@ -106,6 +105,9 @@ jobs:
             check "kvmalloc_array (kernel<4.12)"        '\bkvmalloc_array\b'
             check "SECCOMP_ARCH_NATIVE_NR (kernel<5.8)" '\bSECCOMP_ARCH_NATIVE_NR\b'
             check "uapi/linux/mount.h (kernel<5.8)"     'uapi/linux/mount\.h'
+            check "handle_inode_event (kernel<5.1)"     'handle_inode_event'
+            check "fsnotify_add_inode_mark (kernel<5.2)" 'fsnotify_add_inode_mark'
+            check "ksys_close/ksys_unshare (kernel<4.17)" 'ksys_close|ksys_unshare'
             check "__pte_to_phys (needs compat define)" '\b__pte_to_phys\b'
           else
             echo "  Submodule dir not found — scan skipped"
@@ -129,14 +131,15 @@ jobs:
             echo "--- Scanning: $SEARCH_DIR ---"
             while IFS= read -r f; do
               CHANGED=0
+              BN=$(basename "$f")
 
-              # FIX: __poll_t -> unsigned int (kernel 4.16+)
+              # ── FIX: __poll_t -> unsigned int (kernel 4.16+) ──────────────────
               if grep -qE '\b__poll_t\b' "$f" 2>/dev/null; then
                 sed -i -E 's/\b__poll_t\b/unsigned int/g' "$f"
                 echo "  [__poll_t] $f"; CHANGED=1
               fi
 
-              # FIX: EPOLL* -> POLL* (kernel 4.16+)
+              # ── FIX: EPOLL* -> POLL* (kernel 4.16+) ───────────────────────────
               if grep -qE '\bEPOLL(IN|HUP|RDNORM|OUT|ERR|PRI|WRNORM|WRBAND|RDBAND)\b' "$f" 2>/dev/null; then
                 sed -i -E \
                   -e 's/\bEPOLLHUP\b/POLLHUP/g'      \
@@ -152,19 +155,19 @@ jobs:
                 echo "  [EPOLL*] $f"; CHANGED=1
               fi
 
-              # FIX: kvcalloc -> kcalloc (kernel 4.15+)
+              # ── FIX: kvcalloc -> kcalloc (kernel 4.15+) ───────────────────────
               if grep -qE '\bkvcalloc\b' "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvcalloc\b/kcalloc/g' "$f"
                 echo "  [kvcalloc] $f"; CHANGED=1
               fi
 
-              # FIX: kvmalloc_array -> kmalloc_array (kernel 4.12+)
+              # ── FIX: kvmalloc_array -> kmalloc_array (kernel 4.12+) ───────────
               if grep -qE '\bkvmalloc_array\b' "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvmalloc_array\b/kmalloc_array/g' "$f"
                 echo "  [kvmalloc_array] $f"; CHANGED=1
               fi
 
-              # FIX: kvmalloc -> kmalloc, kvfree -> kfree (kernel 4.12+)
+              # ── FIX: kvmalloc -> kmalloc, kvfree -> kfree (kernel 4.12+) ──────
               if grep -qE '\bkvmalloc\b' "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvmalloc\b/kmalloc/g' "$f"
                 echo "  [kvmalloc] $f"; CHANGED=1
@@ -174,7 +177,7 @@ jobs:
                 echo "  [kvfree] $f"; CHANGED=1
               fi
 
-              # FIX: SECCOMP_ARCH_NATIVE_NR (kernel 5.8+) - wrap body with #ifdef + stubs
+              # ── FIX: SECCOMP_ARCH_NATIVE_NR (kernel 5.8+) ─────────────────────
               if grep -qE '\bSECCOMP_ARCH_NATIVE_NR\b' "$f" 2>/dev/null; then
                 if ! grep -q 'ifdef SECCOMP_ARCH_NATIVE_NR' "$f" 2>/dev/null; then
                   echo "  [SECCOMP_ARCH_NATIVE_NR] $f"
@@ -199,13 +202,13 @@ jobs:
                 fi
               fi
 
-              # FIX: uapi/linux/mount.h -> linux/mount.h (split in kernel 5.8)
+              # ── FIX: uapi/linux/mount.h -> linux/mount.h (kernel 5.8+) ────────
               if grep -q 'uapi/linux/mount.h' "$f" 2>/dev/null; then
                 sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>|g' "$f"
                 echo "  [uapi/mount.h] $f"; CHANGED=1
               fi
 
-              # FIX: __pte_to_phys compat define (not in kernel 4.14 ARM64)
+              # ── FIX: __pte_to_phys compat define (not in kernel 4.14 ARM64) ───
               if grep -qE '\b__pte_to_phys\b' "$f" 2>/dev/null; then
                 if ! grep -q 'define __pte_to_phys\|ifndef __pte_to_phys' "$f" 2>/dev/null; then
                   if ! grep -qE '#include.*pgtable' "$f" 2>/dev/null; then
@@ -222,7 +225,7 @@ jobs:
                 fi
               fi
 
-              # FIX: strncpy_from_user - add <linux/uaccess.h> if missing
+              # ── FIX: strncpy_from_user - add uaccess.h if missing ─────────────
               if grep -q 'strncpy_from_user' "$f" 2>/dev/null; then
                 if ! grep -q '#include <linux/uaccess.h>' "$f" 2>/dev/null; then
                   sed -i '1s|^|#include <linux/uaccess.h>\n|' "$f"
@@ -230,7 +233,7 @@ jobs:
                 fi
               fi
 
-              # FIX: selinux_inode() compat cast (kernel < 5.1)
+              # ── FIX: selinux_inode() compat cast (kernel < 5.1) ───────────────
               if grep -q 'selinux_inode(' "$f" 2>/dev/null; then
                 sed -i -E \
                   's/selinux_inode\(([^)]+)\)/(struct inode_security_struct *)(\1)->i_security/g' \
@@ -238,12 +241,86 @@ jobs:
                 echo "  [selinux_inode] $f"; CHANGED=1
               fi
 
+              # ── FIX: pkg_observer.c — fsnotify API (kernel 4.14 vs 5.1+/5.2+) ─
+              # handle_inode_event added in 5.1; fsnotify_add_inode_mark added in 5.2
+              if [ "$BN" = "pkg_observer.c" ]; then
+                if grep -q 'handle_inode_event' "$f" 2>/dev/null; then
+                  if ! grep -q 'handle_event_compat' "$f" 2>/dev/null; then
+                    echo "  [fsnotify compat] $f"
+
+                    # Step 1: inject compat macro + wrapper before fsnotify_ops struct
+                    awk '
+                      /static const struct fsnotify_ops/ && !done {
+                        print "#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)"
+                        print "#define ksu_fsnotify_add_compat(m,nd,i) fsnotify_add_mark(m, nd, i, NULL, 0)"
+                        print "#else"
+                        print "#define ksu_fsnotify_add_compat(m,nd,i) fsnotify_add_inode_mark(m, i, 0)"
+                        print "#endif"
+                        print ""
+                        print "#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0)"
+                        print "static int ksu_handle_event_compat("
+                        print "    struct fsnotify_group *group, struct inode *inode,"
+                        print "    struct fsnotify_mark *inode_mark, struct fsnotify_mark *vfsmount_mark,"
+                        print "    u32 mask, const void *data, int data_type,"
+                        print "    const unsigned char *file_name, u32 cookie,"
+                        print "    struct fsnotify_iter_info *iter_info)"
+                        print "{"
+                        print "    struct qstr qn = QSTR_INIT(file_name, file_name ? (u32)strlen((const char *)file_name) : 0u);"
+                        print "    return ksu_handle_inode_event(inode_mark, mask, inode, inode, &qn, cookie);"
+                        print "}"
+                        print "#endif"
+                        print ""
+                        done = 1
+                      }
+                      { print }
+                    ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+
+                    # Step 2: version-guard the ops struct field
+                    sed -i \
+                      's/\.handle_inode_event = ksu_handle_inode_event,/#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n    .handle_inode_event = ksu_handle_inode_event,\n#else\n    .handle_event = ksu_handle_event_compat,\n#endif/' \
+                      "$f"
+
+                    # Step 3: replace fsnotify_add_inode_mark with compat macro
+                    sed -i \
+                      's/fsnotify_add_inode_mark(m, inode, 0)/ksu_fsnotify_add_compat(m, g, inode)/g' \
+                      "$f"
+
+                    CHANGED=1
+                  fi
+                fi
+              fi
+
+              # ── FIX: su_mount_ns.c — ksys_close/ksys_unshare (kernel 4.17+) ───
+              # Add extern declarations so compiler knows the signature; Samsung
+              # 4.14 kernels typically export these as backports.
+              if [ "$BN" = "su_mount_ns.c" ]; then
+                if grep -qE '\bksys_close\b|\bksys_unshare\b' "$f" 2>/dev/null; then
+                  if ! grep -q 'extern.*ksys_close\|extern.*ksys_unshare' "$f" 2>/dev/null; then
+                    echo "  [ksys_close/ksys_unshare decl] $f"
+                    awk '
+                      /^#include/ { lastinc = NR }
+                      { lines[NR] = $0 }
+                      END {
+                        for (i = 1; i <= NR; i++) {
+                          print lines[i]
+                          if (i == lastinc && !added) {
+                            print "#include <linux/syscalls.h>"
+                            added = 1
+                          }
+                        }
+                      }
+                    ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+                    CHANGED=1
+                  fi
+                fi
+              fi
+
               if [ "$CHANGED" -eq 1 ]; then PATCHED=$((PATCHED+1)); fi
 
             done < <(find "$SEARCH_DIR" \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
           done
 
-          # FIX: ksu_handle_* implicit declarations in base kernel .c files
+          # ── FIX: ksu_handle_* implicit declarations in base kernel .c files ──
           echo "--- Scanning base kernel for ksu_handle_* implicit decls ---"
           while IFS= read -r f; do
             FUNCS=$(grep -oE '\bksu_handle_[a-zA-Z0-9_]+\b' "$f" 2>/dev/null | sort -u || true)
@@ -279,7 +356,7 @@ jobs:
           echo ""
           echo "Files modified: $PATCHED"
 
-          # Verification: critical symbols must be gone
+          # Verification
           BAD=""
           for SEARCH_DIR in "${DIRS[@]}"; do
             R=$(grep -rn -E '\b__poll_t\b|\bEPOLLIN\b|\bEPOLLHUP\b|\bkvcalloc\b|\bkvmalloc_array\b' \
@@ -300,6 +377,14 @@ jobs:
               fi
               if grep -q 'uapi/linux/mount.h' "$f" 2>/dev/null; then
                 echo "::error::uapi/mount.h still present in $f"; exit 1
+              fi
+              BN=$(basename "$f")
+              if [ "$BN" = "pkg_observer.c" ]; then
+                if grep -q 'handle_inode_event' "$f" 2>/dev/null; then
+                  if ! grep -q 'handle_event_compat\|LINUX_VERSION_CODE.*5.*1' "$f" 2>/dev/null; then
+                    echo "::error::pkg_observer.c fsnotify compat missing"; exit 1
+                  fi
+                fi
               fi
             done < <(find "$SEARCH_DIR" -name "*.c" 2>/dev/null)
           done
