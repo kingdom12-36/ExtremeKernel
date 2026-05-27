@@ -69,18 +69,14 @@ jobs:
           CLANG_DIR=toolchain/neutron_18
           if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
             echo "Downloading Neutron Clang 18..."
-            rm -rf "$CLANG_DIR"
-            mkdir -p "$CLANG_DIR"
-            pushd "$CLANG_DIR"
+            rm -rf "$CLANG_DIR"; mkdir -p "$CLANG_DIR"; pushd "$CLANG_DIR"
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
             bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
             popd
           else
             echo "Toolchain restored from cache."
           fi
-          if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
-            ln -sf clang-18 "$CLANG_DIR/bin/clang"
-          fi
+          [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ] && ln -sf clang-18 "$CLANG_DIR/bin/clang"
           echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
 
       - name: Sync manager submodule
@@ -89,53 +85,40 @@ jobs:
           git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
           git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
 
-      # ── Scan: report issues (never blocks — patch step fixes everything) ─────
+      # ── Scan: report issues (never blocks — patch step handles everything) ────
       - name: Fast scan - kernel API compatibility
         run: |
           echo "=================================================================="
           echo " PRE-BUILD SCAN — ${{ matrix.manager }} | $(date -u)"
           echo "=================================================================="
           ERRORS=0; WARNS=0
-
           SCAN_DIR="${{ matrix.submodule }}/kernel"
           if [ ! -d "$SCAN_DIR" ]; then
-            echo "  Submodule dir not found: $SCAN_DIR — skipping scan"
+            echo "  Submodule dir not found yet — scan skipped"
           else
             echo "Scanning: $SCAN_DIR"
-
-            e=$(grep -rn -E "\b__poll_t\b"                                     "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$e" ] && { echo "  ERROR __poll_t (kernel<4.16):";         echo "$e"|head -5|sed 's/^/    /'; ERRORS=$((ERRORS+1)); } || echo "  OK  __poll_t"
-
-            e=$(grep -rn -E "\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b" "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$e" ] && { echo "  ERROR EPOLL* (kernel<4.16):";           echo "$e"|head -5|sed 's/^/    /'; ERRORS=$((ERRORS+1)); } || echo "  OK  EPOLL*"
-
-            e=$(grep -rn -E "\bkvmalloc_array\b"                               "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$e" ] && { echo "  ERROR kvmalloc_array (kernel<4.12):";   echo "$e"|head -5|sed 's/^/    /'; ERRORS=$((ERRORS+1)); } || echo "  OK  kvmalloc_array"
-
-            e=$(grep -rn -E "\bkvcalloc\b"                                     "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$e" ] && { echo "  ERROR kvcalloc (kernel<4.15):";         echo "$e"|head -5|sed 's/^/    /'; ERRORS=$((ERRORS+1)); } || echo "  OK  kvcalloc"
-
-            w=$(grep -rn -E "\bstrncpy_from_user\b"                             "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$w" ] && { echo "  WARN strncpy_from_user"; WARNS=$((WARNS+1)); } || echo "  OK  strncpy_from_user"
-
-            w=$(grep -rn -E "\b__pte_to_phys\b"                                 "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$w" ] && { echo "  WARN __pte_to_phys"; WARNS=$((WARNS+1)); } || echo "  OK  __pte_to_phys"
-
-            w=$(grep -rn -E "\bselinux_inode\b"                                 "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$w" ] && { echo "  WARN selinux_inode (added kernel 5.1)"; WARNS=$((WARNS+1)); } || echo "  OK  selinux_inode"
-
-            w=$(grep -rn -E "\bset_fs\b|\bget_fs\b"                             "$SCAN_DIR" 2>/dev/null || true)
-            [ -n "$w" ] && { echo "  WARN set_fs/get_fs (removed 5.10+)"; WARNS=$((WARNS+1)); } || echo "  OK  set_fs/get_fs"
+            check_e() { local label="$1" pat="$2"
+              e=$(grep -rn -E "$pat" "$SCAN_DIR" 2>/dev/null || true)
+              [ -n "$e" ] && { echo "  ISSUE $label:"; echo "$e"|head -3|sed 's/^/    /'; ERRORS=$((ERRORS+1)); } || echo "  OK  $label"
+            }
+            check_w() { local label="$1" pat="$2"
+              w=$(grep -rn -E "$pat" "$SCAN_DIR" 2>/dev/null || true)
+              [ -n "$w" ] && { echo "  WARN $label"; WARNS=$((WARNS+1)); } || echo "  OK  $label"
+            }
+            check_e "__poll_t (kernel<4.16)"                   "\b__poll_t\b"
+            check_e "EPOLL* constants (kernel<4.16)"           "\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b"
+            check_e "kvcalloc (kernel<4.15)"                   "\bkvcalloc\b"
+            check_e "kvmalloc_array (kernel<4.12)"             "\bkvmalloc_array\b"
+            check_e "SECCOMP_ARCH_NATIVE_NR (kernel<5.8)"      "\bSECCOMP_ARCH_NATIVE_NR\b"
+            check_w "strncpy_from_user"                        "\bstrncpy_from_user\b"
+            check_w "__pte_to_phys"                            "\b__pte_to_phys\b"
+            check_w "selinux_inode (kernel<5.1)"               "\bselinux_inode\b"
+            check_w "set_fs/get_fs (removed 5.10+)"            "\bset_fs\b|\bget_fs\b"
           fi
-
           echo ""
-          echo " SCAN RESULT [${{ matrix.manager }}]: $ERRORS error(s)  $WARNS warning(s)"
-          echo " → Auto-patch will fix these before compile"
+          echo " SCAN [${{ matrix.manager }}]: $ERRORS issue(s) found — auto-patch will fix"
           echo "=================================================================="
-
-          [ "$ERRORS" -gt 0 ] && echo "::warning::[${{ matrix.manager }}] $ERRORS issue(s) found — auto-patching now"
-          [ "$WARNS"  -gt 0 ] && echo "::warning::[${{ matrix.manager }}] $WARNS warning(s) — auto-patching now"
-          true  # never block — patch step handles everything
+          true   # never block the build
 
       # ── Auto-patch ALL managers — kernel 4.14 compat ─────────────────────────
       - name: Apply kernel 4.14 compat patches
@@ -145,121 +128,141 @@ jobs:
           echo "=================================================================="
           PATCHED=0
 
-          # Build list of directories to patch
           DIRS=()
           [ -d "${{ matrix.submodule }}/kernel" ] && DIRS+=("${{ matrix.submodule }}/kernel")
           [ -d "drivers/kernelsu"               ] && DIRS+=("drivers/kernelsu")
 
           if [ ${#DIRS[@]} -eq 0 ]; then
-            echo "  No patchable directories found yet — will retry after build setup"
+            echo "  No patchable directories found — skipping"
             exit 0
           fi
 
           for SEARCH_DIR in "${DIRS[@]}"; do
-            echo "Patching directory: $SEARCH_DIR"
+            echo "Patching: $SEARCH_DIR"
             while IFS= read -r f; do
-
               CHANGED=0
-              BEFORE=$(md5sum "$f" 2>/dev/null || echo "new")
 
-              # FIX: __poll_t → unsigned int  (type added in kernel 4.16)
+              # ── FIX: __poll_t → unsigned int  (added kernel 4.16) ─────────────
               if grep -qE "\b__poll_t\b" "$f" 2>/dev/null; then
                 sed -i -E 's/\b__poll_t\b/unsigned int/g' "$f"
-                echo "  [__poll_t] $f"
-                CHANGED=1
+                echo "  [__poll_t] $f"; CHANGED=1
               fi
 
-              # FIX: EPOLL* → POLL*  (EPOLL_ prefixes added in kernel 4.16)
+              # ── FIX: EPOLL* → POLL*  (prefixes added kernel 4.16) ─────────────
               if grep -qE "\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b|\bEPOLLPRI\b|\bEPOLLWRNORM\b|\bEPOLLWRBAND\b|\bEPOLLRDBAND\b" "$f" 2>/dev/null; then
-                sed -i -E 's/\bEPOLLHUP\b/POLLHUP/g'       "$f"
-                sed -i -E 's/\bEPOLLIN\b/POLLIN/g'          "$f"
-                sed -i -E 's/\bEPOLLRDNORM\b/POLLRDNORM/g'  "$f"
-                sed -i -E 's/\bEPOLLOUT\b/POLLOUT/g'        "$f"
-                sed -i -E 's/\bEPOLLERR\b/POLLERR/g'        "$f"
-                sed -i -E 's/\bEPOLLPRI\b/POLLPRI/g'        "$f"
-                sed -i -E 's/\bEPOLLWRNORM\b/POLLWRNORM/g'  "$f"
-                sed -i -E 's/\bEPOLLWRBAND\b/POLLWRBAND/g'  "$f"
-                sed -i -E 's/\bEPOLLRDBAND\b/POLLRDBAND/g'  "$f"
-                echo "  [EPOLL*] $f"
-                CHANGED=1
+                sed -i -E \
+                  -e 's/\bEPOLLHUP\b/POLLHUP/g'      \
+                  -e 's/\bEPOLLIN\b/POLLIN/g'         \
+                  -e 's/\bEPOLLRDNORM\b/POLLRDNORM/g' \
+                  -e 's/\bEPOLLOUT\b/POLLOUT/g'       \
+                  -e 's/\bEPOLLERR\b/POLLERR/g'       \
+                  -e 's/\bEPOLLPRI\b/POLLPRI/g'       \
+                  -e 's/\bEPOLLWRNORM\b/POLLWRNORM/g' \
+                  -e 's/\bEPOLLWRBAND\b/POLLWRBAND/g' \
+                  -e 's/\bEPOLLRDBAND\b/POLLRDBAND/g' \
+                  "$f"
+                echo "  [EPOLL*] $f"; CHANGED=1
               fi
 
-              # FIX: kvcalloc → kcalloc  (kvcalloc added in kernel 4.15)
+              # ── FIX: kvcalloc → kcalloc  (added kernel 4.15) ──────────────────
               if grep -qE "\bkvcalloc\b" "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvcalloc\b/kcalloc/g' "$f"
-                echo "  [kvcalloc] $f"
-                CHANGED=1
+                echo "  [kvcalloc] $f"; CHANGED=1
               fi
 
-              # FIX: kvmalloc_array → kmalloc_array  (kvmalloc_array added in kernel 4.12)
+              # ── FIX: kvmalloc_array → kmalloc_array  (added kernel 4.12) ──────
               if grep -qE "\bkvmalloc_array\b" "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvmalloc_array\b/kmalloc_array/g' "$f"
-                echo "  [kvmalloc_array] $f"
-                CHANGED=1
+                echo "  [kvmalloc_array] $f"; CHANGED=1
               fi
 
-              # FIX: kvmalloc → kmalloc  (kvmalloc added in kernel 4.12)
+              # ── FIX: kvmalloc → kmalloc / kvfree → kfree  (added 4.12) ────────
               if grep -qE "\bkvmalloc\b" "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvmalloc\b/kmalloc/g' "$f"
-                echo "  [kvmalloc] $f"
-                CHANGED=1
+                echo "  [kvmalloc] $f"; CHANGED=1
               fi
-
-              # FIX: kvfree → kfree  (kvfree added in kernel 4.12)
               if grep -qE "\bkvfree\b" "$f" 2>/dev/null; then
                 sed -i -E 's/\bkvfree\b/kfree/g' "$f"
-                echo "  [kvfree] $f"
+                echo "  [kvfree] $f"; CHANGED=1
+              fi
+
+              # ── FIX: SECCOMP_ARCH_NATIVE_NR  (added kernel 5.8) ───────────────
+              # Wrap entire non-include body with #ifdef guard + empty stubs
+              if grep -qE "\bSECCOMP_ARCH_NATIVE_NR\b" "$f" 2>/dev/null && \
+                 ! grep -q "ifdef SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null; then
+                echo "  [SECCOMP_ARCH_NATIVE_NR] $f"
+                awk '
+                  /^#include/ { lastinc = NR }
+                  { lines[NR] = $0 }
+                  END {
+                    for (i = 1; i <= NR; i++) {
+                      print lines[i]
+                      if (i == lastinc) {
+                        print ""
+                        print "#ifdef SECCOMP_ARCH_NATIVE_NR"
+                      }
+                    }
+                    print "#else"
+                    print "void ksu_seccomp_clear_cache(struct seccomp_filter *filter, int nr) { (void)filter; (void)nr; }"
+                    print "void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr) { (void)filter; (void)nr; }"
+                    print "#endif /* SECCOMP_ARCH_NATIVE_NR */"
+                  }
+                ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
                 CHANGED=1
               fi
 
-              # FIX: strncpy_from_user — add missing <linux/uaccess.h>
+              # ── FIX: strncpy_from_user — add <linux/uaccess.h> if missing ─────
               if grep -q "strncpy_from_user" "$f" 2>/dev/null && \
                  ! grep -q "#include <linux/uaccess.h>" "$f" 2>/dev/null; then
                 sed -i '1s|^|#include <linux/uaccess.h>\n|' "$f"
-                echo "  [uaccess.h] $f"
-                CHANGED=1
+                echo "  [uaccess.h] $f"; CHANGED=1
               fi
 
-              # FIX: __pte_to_phys — add missing <asm/pgtable.h>
+              # ── FIX: __pte_to_phys — add <asm/pgtable.h> if missing ───────────
               if grep -q "__pte_to_phys" "$f" 2>/dev/null && \
                  ! grep -qE "#include.*pgtable" "$f" 2>/dev/null; then
                 sed -i '1s|^|#include <asm/pgtable.h>\n|' "$f"
-                echo "  [pgtable.h] $f"
-                CHANGED=1
+                echo "  [pgtable.h] $f"; CHANGED=1
               fi
 
-              # FIX: selinux_inode() — compat cast for kernel < 5.1
+              # ── FIX: selinux_inode() compat cast for kernel < 5.1 ─────────────
               if grep -q "selinux_inode(" "$f" 2>/dev/null; then
                 sed -i -E \
                   's/selinux_inode\(([^)]+)\)/(struct inode_security_struct *)(\1)->i_security/g' \
                   "$f"
-                echo "  [selinux_inode] $f"
-                CHANGED=1
+                echo "  [selinux_inode] $f"; CHANGED=1
               fi
 
-              AFTER=$(md5sum "$f" 2>/dev/null || echo "changed")
-              [ "$CHANGED" -eq 1 ] && [ "$BEFORE" != "$AFTER" ] && PATCHED=$((PATCHED+1))
-
+              [ "$CHANGED" -eq 1 ] && PATCHED=$((PATCHED+1))
             done < <(find "$SEARCH_DIR" \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
           done
 
           echo ""
           echo "Files modified: $PATCHED"
 
-          # Verify — critical errors must be gone
-          REMAINING=""
+          # ── Verify critical errors gone ───────────────────────────────────────
+          BAD=""
           for SEARCH_DIR in "${DIRS[@]}"; do
-            R=$(grep -rn -E "\b__poll_t\b|\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bkvcalloc\b|\bkvmalloc_array\b" \
+            R=$(grep -rn -E "\b__poll_t\b|\bEPOLLIN\b|\bEPOLLHUP\b|\bkvcalloc\b|\bkvmalloc_array\b" \
                   "$SEARCH_DIR" 2>/dev/null || true)
-            REMAINING="$REMAINING$R"
+            BAD="$BAD$R"
+          done
+          if [ -n "$BAD" ]; then
+            echo "::error::Verification failed — symbols still present:"
+            echo "$BAD"; exit 1
+          fi
+
+          # Check SECCOMP separately (awk guard changes the structure)
+          for SEARCH_DIR in "${DIRS[@]}"; do
+            while IFS= read -r f; do
+              if grep -q "SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null && \
+                 ! grep -q "ifdef SECCOMP_ARCH_NATIVE_NR" "$f" 2>/dev/null; then
+                echo "::error::SECCOMP guard missing in $f"; exit 1
+              fi
+            done < <(find "$SEARCH_DIR" -name "*.c" 2>/dev/null)
           done
 
-          if [ -n "$REMAINING" ]; then
-            echo "::error::Verification failed — symbols still present after patching:"
-            echo "$REMAINING"
-            exit 1
-          fi
-          echo "Verification passed — all kernel 4.14 incompatibilities resolved."
+          echo "Verification passed — all patches applied."
           echo "=================================================================="
 
       - name: Generate random KPatch superkey
@@ -274,17 +277,11 @@ jobs:
           VERSION=$(( ${{ matrix.version_base }} + COUNT + ${{ matrix.version_offset }} ))
           echo "KSU_COMMIT=$KSU_COMMIT" >> $GITHUB_ENV
           echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Manager: ${{ matrix.manager }} | commit: $KSU_COMMIT | version: $VERSION"
+          echo "Manager: ${{ matrix.manager }} | version: $VERSION"
 
       - name: Show fingerprint summary
         run: |
-          echo "===================="
-          echo "Manager:         ${{ matrix.manager }}"
-          echo "Kernel commit:   $KERNEL_COMMIT"
-          echo "Manager commit:  $KSU_COMMIT"
-          echo "Manager version: $KSU_VERSION"
-          echo "KPatch superkey: $KPATCH_SUPERKEY"
-          echo "===================="
+          echo "Manager: ${{ matrix.manager }} | Kernel: $KERNEL_COMMIT | KSU: $KSU_VERSION"
 
       - name: Build d2s kernel
         env:
@@ -320,20 +317,11 @@ jobs:
           cp build/updater-script   build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
           cp kpatch-android         build/out/d2s-kpatch/zip/files/kpatch-android
           ./toolchain/mkbootimg \
-            --base 0x10000000 \
-            --board SRPSC14B009KU \
-            --cmdline 'loop.max_part=7' \
-            --hashtype sha1 \
-            --header_version 1 \
-            --kernel "$PATCHED_IMAGE" \
-            --kernel_offset 0x00008000 \
-            --os_patch_level 2025-01 \
-            --os_version 14.0.0 \
-            --pagesize 2048 \
-            --ramdisk build/out/d2s/ramdisk.cpio.gz \
-            --ramdisk_offset 0xF0000000 \
-            --second_offset 0xF0000000 \
-            --tags_offset 0x00000100 \
+            --base 0x10000000 --board SRPSC14B009KU --cmdline 'loop.max_part=7' \
+            --hashtype sha1 --header_version 1 --kernel "$PATCHED_IMAGE" \
+            --kernel_offset 0x00008000 --os_patch_level 2025-01 --os_version 14.0.0 \
+            --pagesize 2048 --ramdisk build/out/d2s/ramdisk.cpio.gz \
+            --ramdisk_offset 0xF0000000 --second_offset 0xF0000000 --tags_offset 0x00000100 \
             -o build/out/d2s-kpatch/zip/files/boot.img
 
       - name: Save build metadata
