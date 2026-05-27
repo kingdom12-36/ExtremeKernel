@@ -94,6 +94,111 @@ jobs:
           # Full history required — shallow clone breaks commit-count version calc
           git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
 
+      # ── Fast static scan: catch issues before the compiler runs ──────────────
+      - name: Fast scan - kernel API compatibility check
+        run: |
+          echo "==================================================================="
+          echo " PRE-BUILD SCAN — Manager: ${{ matrix.manager }} | $(date -u)"
+          echo "==================================================================="
+          ERRORS=0
+          WARNS=0
+
+          check_error() {
+            local label="$1"; local pattern="$2"
+            local hits
+            hits=$(grep -rn -E "$pattern" drivers/kernelsu/ 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "  ERROR: $label"
+              echo "$hits" | head -20 | sed 's/^/    /'
+              ERRORS=$((ERRORS+1))
+            fi
+          }
+          check_warn() {
+            local label="$1"; local pattern="$2"
+            local hits
+            hits=$(grep -rn -E "$pattern" drivers/kernelsu/ 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "  WARN: $label"
+              echo "$hits" | head -10 | sed 's/^/    /'
+              WARNS=$((WARNS+1))
+            fi
+          }
+
+          echo ">>> Checking kernel 4.14 API compatibility..."
+          check_error "__poll_t (not in kernel < 4.16)"           "\b__poll_t\b"
+          check_error "EPOLL* constants (not in kernel < 4.16)"   "\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b"
+          check_error "kvmalloc_array (not in kernel < 4.12)"     "\bkvmalloc_array\b"
+          check_error "kvcalloc (not in kernel < 4.15)"           "\bkvcalloc\b"
+
+          echo ">>> Checking implicit declarations..."
+          check_warn "strncpy_from_user — check #include <linux/uaccess.h>" "\bstrncpy_from_user\b"
+          check_warn "__pte_to_phys — check #include <asm/pgtable.h>"       "\b__pte_to_phys\b"
+          check_warn "selinux_inode — version-dependent availability"        "\bselinux_inode\b"
+          check_warn "set_fs/get_fs — removed in kernel 5.10+"              "\bset_fs\b|\bget_fs\b"
+
+          echo ""
+          echo "==================================================================="
+          echo " SCAN RESULT — ${{ matrix.manager }}: $ERRORS error(s), $WARNS warning(s)"
+          echo "==================================================================="
+
+          if [ "$ERRORS" -gt 0 ]; then
+            if [ "${{ matrix.manager }}" = "sukisu" ]; then
+              echo "::warning::[${{ matrix.manager }}] $ERRORS issue(s) detected — will be auto-patched in next step."
+            else
+              echo "::error::[${{ matrix.manager }}] $ERRORS build-breaking issue(s) — no auto-patch available for this manager."
+              exit 1
+            fi
+          fi
+
+      # ── SukiSU only: auto-patch kernel 4.14 incompatibilities ───────────────
+      - name: Apply kernel 4.14 compat patches (sukisu only)
+        if: matrix.manager == 'sukisu'
+        run: |
+          echo "==================================================================="
+          echo " PATCHING — SukiSU kernel 4.14 compatibility | $(date -u)"
+          echo "==================================================================="
+          PATCHED=0
+
+          while IFS= read -r f; do
+            CHANGED=0
+
+            # Check if file has any incompatible symbols
+            if grep -qE "\b__poll_t\b|\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b|\bEPOLLOUT\b|\bEPOLLERR\b" "$f" 2>/dev/null; then
+              echo "Patching: $f"
+              BEFORE=$(md5sum "$f")
+
+              # __poll_t → unsigned int  (kernel 4.16+ type)
+              sed -i -E 's/\b__poll_t\b/unsigned int/g' "$f"
+
+              # EPOLL* → POLL*  (kernel 4.16+ prefixed constants)
+              sed -i -E 's/\bEPOLLHUP\b/POLLHUP/g'     "$f"
+              sed -i -E 's/\bEPOLLIN\b/POLLIN/g'        "$f"
+              sed -i -E 's/\bEPOLLRDNORM\b/POLLRDNORM/g' "$f"
+              sed -i -E 's/\bEPOLLOUT\b/POLLOUT/g'      "$f"
+              sed -i -E 's/\bEPOLLERR\b/POLLERR/g'      "$f"
+              sed -i -E 's/\bEPOLLPRI\b/POLLPRI/g'      "$f"
+
+              AFTER=$(md5sum "$f")
+              if [ "$BEFORE" != "$AFTER" ]; then
+                echo "  -> Modified: $f"
+                PATCHED=$((PATCHED+1))
+              fi
+            fi
+          done < <(find drivers/kernelsu/ \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
+
+          echo ""
+          echo "Files patched: $PATCHED"
+
+          # Verify — no incompatible symbols should remain
+          REMAINING=$(grep -rn -E "\b__poll_t\b|\bEPOLLIN\b|\bEPOLLHUP\b|\bEPOLLRDNORM\b" drivers/kernelsu/ 2>/dev/null || true)
+          if [ -n "$REMAINING" ]; then
+            echo "::error::Patch verification failed — incompatible symbols still present:"
+            echo "$REMAINING"
+            exit 1
+          fi
+          echo "Verification passed — all kernel 4.14 incompatibilities resolved."
+          echo "==================================================================="
+
       - name: Generate random KPatch superkey
         run: |
           echo "KPATCH_SUPERKEY=$(openssl rand -hex 16)" >> $GITHUB_ENV
