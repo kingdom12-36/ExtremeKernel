@@ -180,6 +180,30 @@ if [[ "${KSU_OPTION,,}" == "y" ]]; then
     echo "-----------------------------------------------"
     rm -f drivers/kernelsu
     ln -sf "../${MANAGER_DIR}/kernel" drivers/kernelsu
+
+    # Patch SukiSU's syscall_hook.h for ARM64 kernel 4.14 compatibility.
+    # The header uses syscall_fn_t which is only typedef'd for x86_64 in
+    # SukiSU's source; without CONFIG_KSU_MANUAL_HOOK the compiler hits
+    # it directly and aborts.  Adding the ARM64 typedef is harmless and
+    # future-proofs against upstream SukiSU changes.
+    if [[ "${MANAGER_DIR}" == "SukiSU" ]]; then
+        SHOOK="${MANAGER_DIR}/kernel/hook/syscall_hook.h"
+        if grep -q '__x86_64__' "$SHOOK" 2>/dev/null && ! grep -q '__aarch64__' "$SHOOK" 2>/dev/null; then
+            awk '
+/^#include <asm\/syscall.h>/ {
+    print $0
+    print "/* ARM64 kernel 4.14 compat: syscall_fn_t absent from asm/syscall.h < 5.0 */"
+    print "#if defined(__aarch64__) && !defined(__syscall_fn_t_defined)"
+    print "#define __syscall_fn_t_defined"
+    print "typedef long (*syscall_fn_t)(const struct pt_regs *);"
+    print "#endif"
+    next
+}
+{ print }
+' "$SHOOK" > "${SHOOK}.tmp" && mv "${SHOOK}.tmp" "$SHOOK"
+            echo "SukiSU: patched syscall_hook.h for ARM64 4.14 compat"
+        fi
+    fi
 fi
 
 # Android OS version mapping for mkbootimg
