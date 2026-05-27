@@ -263,6 +263,30 @@ if (changed) { fs.writeFileSync('${LSM_HOOK}', c); console.log('SukiSU patch 4: 
 else { console.log('SukiSU patch 4: no patterns found in lsm_hook.c'); }
 "
         fi
+
+        # Fix 5: patch_memory.c — arm64 cache flush + nofault write API compat for 4.14
+        # __flush_icache_range renamed/added ~5.4; copy_to_kernel_nofault added in 5.8
+        PMEM="${MANAGER_DIR}/kernel/hook/arm64/patch_memory.c"
+        if [ -f "$PMEM" ]; then
+            node -e "
+const fs = require('fs');
+let c = fs.readFileSync('${PMEM}', 'utf8');
+let changed = false;
+
+// Fix a: __flush_icache_range -> flush_icache_range on 4.14
+const OLD_ICACHE = '#define ksu_flush_icache(start, end) __flush_icache_range';
+const NEW_ICACHE = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)\n#define ksu_flush_icache(start, end) __flush_icache_range\n#else\n#define ksu_flush_icache(start, end) flush_icache_range\n#endif';
+if (c.includes(OLD_ICACHE)) { c = c.replace(OLD_ICACHE, NEW_ICACHE); changed = true; }
+
+// Fix b: copy_to_kernel_nofault -> probe_kernel_write on 4.14 (added in 5.8)
+const OLD_NOFAULT = 'ret = (int)copy_to_kernel_nofault(map, src, len);';
+const NEW_NOFAULT = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)\n    ret = (int)copy_to_kernel_nofault(map, src, len);\n#else\n    ret = (int)probe_kernel_write(map, src, len);\n#endif';
+if (c.includes(OLD_NOFAULT)) { c = c.replace(OLD_NOFAULT, NEW_NOFAULT); changed = true; }
+
+if (changed) { fs.writeFileSync('${PMEM}', c); console.log('SukiSU patch 5: patch_memory.c 4.14 cache/nofault compat fixed'); }
+else { console.log('SukiSU patch 5: patterns not found in patch_memory.c'); }
+"
+        fi
     fi
 fi
 
