@@ -181,28 +181,49 @@ if [[ "${KSU_OPTION,,}" == "y" ]]; then
     rm -f drivers/kernelsu
     ln -sf "../${MANAGER_DIR}/kernel" drivers/kernelsu
 
-    # Patch SukiSU's syscall_hook.h for ARM64 kernel 4.14 compatibility.
-    # The header uses syscall_fn_t which is only typedef'd for x86_64 in
-    # SukiSU's source; without CONFIG_KSU_MANUAL_HOOK the compiler hits
-    # it directly and aborts.  Adding the ARM64 typedef is harmless and
-    # future-proofs against upstream SukiSU changes.
+    # ── SukiSU kernel 4.14 compatibility patches ──────────────────────────────
+    # SukiSU targets Android GKI (5.10+). Two of its APIs are missing on 4.14:
+    # 1. syscall_fn_t typedef  (added in 5.0 for ARM64 in asm/syscall.h)
+    # 2. MODULE_IMPORT_NS macro (added in 5.4 in linux/module.h)
+    # We patch the source in-tree before compilation. Both are no-op fixes:
+    # removing them has zero runtime effect on 4.14.
     if [[ "${MANAGER_DIR}" == "SukiSU" ]]; then
         SHOOK="${MANAGER_DIR}/kernel/hook/syscall_hook.h"
-        if grep -q '__x86_64__' "$SHOOK" 2>/dev/null && ! grep -q '__aarch64__' "$SHOOK" 2>/dev/null; then
-            awk '
-/^#include <asm\/syscall.h>/ {
-    print $0
-    print "/* ARM64 kernel 4.14 compat: syscall_fn_t absent from asm/syscall.h < 5.0 */"
-    print "#if defined(__aarch64__) && !defined(__syscall_fn_t_defined)"
-    print "#define __syscall_fn_t_defined"
-    print "typedef long (*syscall_fn_t)(const struct pt_regs *);"
-    print "#endif"
-    next
+        INITC="${MANAGER_DIR}/kernel/core/init.c"
+
+        # Fix 1: Add ARM64 syscall_fn_t typedef (absent in asm/syscall.h < 5.0)
+        node -e "
+const fs = require('fs');
+let c = fs.readFileSync('${SHOOK}','utf8');
+if (!c.includes('__aarch64__')) {
+    c = c.replace(
+        '#include <asm/syscall.h>',
+        '#include <asm/syscall.h>\n/* ARM64 kernel 4.14 compat */\n#if defined(__aarch64__) && !defined(__ksu_syscall_fn_t)\n#define __ksu_syscall_fn_t\ntypedef long (*syscall_fn_t)(const struct pt_regs *);\n#endif'
+    );
+    fs.writeFileSync('${SHOOK}', c);
+    console.log('SukiSU patch 1: syscall_fn_t typedef added for ARM64 4.14');
 }
-{ print }
-' "$SHOOK" > "${SHOOK}.tmp" && mv "${SHOOK}.tmp" "$SHOOK"
-            echo "SukiSU: patched syscall_hook.h for ARM64 4.14 compat"
-        fi
+"
+        # Fix 2: Guard MODULE_IMPORT_NS — macro added in kernel 5.4, absent in 4.14.
+        # Without the guard the compiler sees an undeclared identifier and aborts.
+        node -e "
+const fs = require('fs');
+let c = fs.readFileSync('${INITC}','utf8');
+const OLD = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)\nMODULE_IMPORT_NS(\"VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver\");\n#else\nMODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);\n#endif';
+const NEW = '/* MODULE_IMPORT_NS added in 5.4 — guarded for 4.14 builds */\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)\nMODULE_IMPORT_NS(\"VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver\");\n#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)\nMODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);\n#endif';
+if (c.includes(OLD)) {
+    fs.writeFileSync('${INITC}', c.replace(OLD, NEW));
+    console.log('SukiSU patch 2: MODULE_IMPORT_NS guarded for kernel 4.14');
+} else {
+    // Fallback: define it as empty if not already defined
+    const FALLBACK = '#ifndef MODULE_IMPORT_NS\n#define MODULE_IMPORT_NS(ns)\n#endif';
+    if (!c.includes(FALLBACK)) {
+        c = c.replace('#include <linux/module.h>', '#include <linux/module.h>\n' + FALLBACK);
+        fs.writeFileSync('${INITC}', c);
+        console.log('SukiSU patch 2 (fallback): MODULE_IMPORT_NS stubbed for kernel 4.14');
+    }
+}
+"
     fi
 fi
 
