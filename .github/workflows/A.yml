@@ -127,19 +127,7 @@ jobs:
           echo "KPatch superkey: $KPATCH_SUPERKEY"
           echo "===================="
 
-      - name: Download ZygiskNext
-        run: |
-          ZYGISK_JSON=$(curl -sf https://api.github.com/repos/Dr-TSNG/ZygiskNext/releases/latest)
-          ZYGISK_VER=$(echo "$ZYGISK_JSON" | grep '"tag_name"' | cut -d'"' -f4)
-          ZYGISK_URL=$(echo "$ZYGISK_JSON" | grep 'browser_download_url' | grep '\.zip' | head -1 | cut -d'"' -f4)
-          echo "ZYGISK_VER=${ZYGISK_VER:-unknown}" >> $GITHUB_ENV
-
-          if [ -n "$ZYGISK_URL" ]; then
-            curl -Lo ZygiskNext.zip "$ZYGISK_URL"
-            echo "Downloaded ZygiskNext $ZYGISK_VER"
-          else
-            echo "ZygiskNext release not found, skipping"
-          fi
+      
 
       - name: Build d2s kernel
         env:
@@ -197,14 +185,6 @@ jobs:
             --second_offset 0xF0000000 \
             --tags_offset 0x00000100 \
             -o build/out/d2s-kpatch/zip/files/boot.img
-
-      - name: Bundle ZygiskNext into artifacts
-        run: |
-          if [ -f ZygiskNext.zip ]; then
-            FNAME="ZygiskNext-${{ env.ZYGISK_VER }}.zip"
-            cp ZygiskNext.zip "build/out/d2s/zip/$FNAME"
-            cp ZygiskNext.zip "build/out/d2s-kpatch/zip/$FNAME"
-          fi
 
       - name: Save build metadata
         run: |
