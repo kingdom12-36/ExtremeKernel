@@ -1,0 +1,239 @@
+name: ExtremeKernel d2s Build (all managers)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build_d2s:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        manager: [ksun, ksu, sukisu]
+        include:
+          - manager: ksun
+            submodule: KernelSU-Next
+            version_base: 30000
+            version_offset: 150
+          - manager: ksu
+            submodule: KernelSU
+            version_base: 10200
+            version_offset: 200
+          - manager: sukisu
+            submodule: SukiSU
+            version_base: 30000
+            version_offset: 200
+
+    name: Build (${{ matrix.manager }})
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+          token: ${{ github.token }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl \
+            zlib1g-dev libc6-dev-i386 libxml2-utils xsltproc unzip fontconfig
+
+      - name: Cache Neutron Clang 18 toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            toolchain/neutron_18
+            ~/.neutron-tc
+          key: neutron-clang-18-05012024-v3
+
+      - name: Cache ccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-d2s-${{ matrix.manager }}-${{ github.ref_name }}-
+            ccache-d2s-${{ matrix.manager }}-
+
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+
+      - name: Setup Neutron Clang 18 toolchain
+        run: |
+          CLANG_DIR=toolchain/neutron_18
+
+          if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
+            echo "Toolchain not in cache - downloading Neutron Clang 18..."
+            rm -rf "$CLANG_DIR"
+            mkdir -p "$CLANG_DIR"
+            pushd "$CLANG_DIR"
+            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=05012024
+            echo "Applying glibc compatibility patch..."
+            bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+            popd
+            echo "Toolchain downloaded and patched."
+          else
+            echo "Toolchain restored from cache."
+          fi
+
+          if [ ! -e "$CLANG_DIR/bin/clang" ] && [ -f "$CLANG_DIR/bin/clang-18" ]; then
+            ln -sf clang-18 "$CLANG_DIR/bin/clang"
+          fi
+          echo "Toolchain: $($CLANG_DIR/bin/clang-18 --version 2>&1 | head -1)"
+
+      - name: Sync manager submodule (full history for version calc)
+        run: |
+          git submodule sync "${{ matrix.submodule }}"
+          git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
+          git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
+
+      - name: Generate random KPatch superkey
+        run: |
+          echo "KPATCH_SUPERKEY=$(openssl rand -hex 16)" >> $GITHUB_ENV
+
+      - name: Kernel + manager fingerprint
+        run: |
+          echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+          cd "${{ matrix.submodule }}"
+          KSU_COMMIT=$(git rev-parse HEAD)
+          COUNT=$(git rev-list --count HEAD)
+          VERSION=$(( ${{ matrix.version_base }} + COUNT + ${{ matrix.version_offset }} ))
+
+          echo "KSU_COMMIT=$KSU_COMMIT" >> $GITHUB_ENV
+          echo "KSU_VERSION=$VERSION" >> $GITHUB_ENV
+          # Export raw git commit count so workflows.sh passes it to kernel make.
+          # This ensures KSU_VERSION is correctly baked into the kernel even when
+          # Kbuild own git detection fails (submodule gitdir quirks in CI).
+          echo "KSU_GIT_COUNT=$COUNT" >> $GITHUB_ENV
+
+          echo "Manager: ${{ matrix.manager }} | submodule: ${{ matrix.submodule }}"
+          echo "Commit: $KSU_COMMIT | count: $COUNT | version: $VERSION"
+
+      - name: Show fingerprint summary
+        run: |
+          echo "===================="
+          echo "Manager:         ${{ matrix.manager }}"
+          echo "Kernel commit:   $KERNEL_COMMIT"
+          echo "Manager commit:  $KSU_COMMIT"
+          echo "Manager version: $KSU_VERSION"
+          echo "KSU git count:   $KSU_GIT_COUNT"
+          echo "KPatch superkey: $KPATCH_SUPERKEY"
+          echo "===================="
+
+      - name: Download ZygiskNext
+        run: |
+          ZYGISK_JSON=$(curl -sf https://api.github.com/repos/Dr-TSNG/ZygiskNext/releases/latest)
+          ZYGISK_VER=$(echo "$ZYGISK_JSON" | grep '"tag_name"' | cut -d'"' -f4)
+          ZYGISK_URL=$(echo "$ZYGISK_JSON" | grep 'browser_download_url' | grep '\.zip' | head -1 | cut -d'"' -f4)
+          echo "ZYGISK_VER=${ZYGISK_VER:-unknown}" >> $GITHUB_ENV
+
+          if [ -n "$ZYGISK_URL" ]; then
+            curl -Lo ZygiskNext.zip "$ZYGISK_URL"
+            echo "Downloaded ZygiskNext $ZYGISK_VER"
+          else
+            echo "ZygiskNext release not found, skipping"
+          fi
+
+      - name: Build d2s kernel
+        env:
+          USE_CCACHE: "1"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: "5G"
+          CCACHE_COMPRESS: "1"
+          KSU_GIT_COUNT: ${{ env.KSU_GIT_COUNT }}
+        run: |
+          chmod +x ./workflows.sh
+          ./workflows.sh -m d2s -k y -r N -M ${{ matrix.manager }}
+
+      - name: Setup KPatch-Next tools
+        run: |
+          KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          echo "KPATCH_VER=$KPATCH_VER" >> $GITHUB_ENV
+
+          curl -Lo kptools        https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
+          curl -Lo kpimg          https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
+          curl -Lo kpatch-android https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpatch-android
+
+          chmod +x kptools kpimg kpatch-android
+          ./kptools --version || true
+
+      - name: Patch kernel with KPatch-Next
+        run: |
+          IMAGE=build/out/d2s/Image
+          PATCHED_IMAGE=build/out/d2s/Image.kp
+
+          ./kptools -i "$IMAGE" -l || true
+          ./kptools -p -i "$IMAGE" -k ./kpimg -s "$KPATCH_SUPERKEY" -o "$PATCHED_IMAGE"
+
+          mkdir -p build/out/d2s-kpatch/zip/files
+          mkdir -p build/out/d2s-kpatch/zip/META-INF/com/google/android
+
+          cp build/out/d2s/dtb.img  build/out/d2s-kpatch/zip/files/dtb.img
+          cp build/out/d2s/dtbo.img build/out/d2s-kpatch/zip/files/dtbo.img
+          cp build/update-binary    build/out/d2s-kpatch/zip/META-INF/com/google/android/update-binary
+          cp build/updater-script   build/out/d2s-kpatch/zip/META-INF/com/google/android/updater-script
+          cp kpatch-android         build/out/d2s-kpatch/zip/files/kpatch-android
+
+          ./toolchain/mkbootimg \
+            --base 0x10000000 \
+            --board SRPSC14B009KU \
+            --cmdline 'loop.max_part=7' \
+            --hashtype sha1 \
+            --header_version 1 \
+            --kernel "$PATCHED_IMAGE" \
+            --kernel_offset 0x00008000 \
+            --os_patch_level 2025-01 \
+            --os_version 14.0.0 \
+            --pagesize 2048 \
+            --ramdisk build/out/d2s/ramdisk.cpio.gz \
+            --ramdisk_offset 0xF0000000 \
+            --second_offset 0xF0000000 \
+            --tags_offset 0x00000100 \
+            -o build/out/d2s-kpatch/zip/files/boot.img
+
+      - name: Bundle ZygiskNext into artifacts
+        run: |
+          if [ -f ZygiskNext.zip ]; then
+            FNAME="ZygiskNext-${{ env.ZYGISK_VER }}.zip"
+            cp ZygiskNext.zip "build/out/d2s/zip/$FNAME"
+            cp ZygiskNext.zip "build/out/d2s-kpatch/zip/$FNAME"
+          fi
+
+      - name: Save build metadata
+        run: |
+          mkdir -p build/out/meta
+          {
+            echo "Manager:         ${{ matrix.manager }}"
+            echo "Kernel Commit:   $KERNEL_COMMIT"
+            echo "Manager Commit:  $KSU_COMMIT"
+            echo "Manager Version: $KSU_VERSION"
+            echo "KSU Git Count:   $KSU_GIT_COUNT"
+            echo "KPatch-Next:     $KPATCH_VER"
+            echo "KPatch Superkey: $KPATCH_SUPERKEY"
+            echo "ZygiskNext:      ${{ env.ZYGISK_VER }}"
+          } > build/out/meta/build-info.txt
+          cat build/out/meta/build-info.txt
+
+      - name: Inject metadata into artifacts
+        run: |
+          cp build/out/meta/build-info.txt build/out/d2s/zip/
+          cp build/out/meta/build-info.txt build/out/d2s-kpatch/zip/
+
+      - name: Upload standard kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2s-${{ matrix.manager }}-KSU${{ env.KSU_VERSION }}
+          path: build/out/d2s/zip
+
+      - name: Upload KPatch kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2s-${{ matrix.manager }}-KPatch-KSU${{ env.KSU_VERSION }}
+          path: build/out/d2s-kpatch/zip
