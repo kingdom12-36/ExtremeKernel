@@ -90,7 +90,11 @@ jobs:
       - name: Sync manager submodule (full history for version calc)
         run: |
           git submodule sync "${{ matrix.submodule }}"
-          git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
+          if [ "${{ matrix.manager }}" = "ksun" ]; then
+            git submodule update --init --force --remote --no-recommend-shallow "${{ matrix.submodule }}"
+          else
+            git submodule update --init --force --no-recommend-shallow "${{ matrix.submodule }}"
+          fi
           git -C "${{ matrix.submodule }}" fetch --unshallow origin 2>/dev/null || true
 
       - name: Generate random KPatch superkey
