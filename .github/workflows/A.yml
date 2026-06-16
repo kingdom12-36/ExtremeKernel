@@ -15,7 +15,7 @@ jobs:
           - manager: ksun
             submodule: KernelSU-Next
             version_base: 30000
-            version_offset: 150
+            version_offset: 15000
           - manager: ksu
             submodule: KernelSU
             version_base: 10200
