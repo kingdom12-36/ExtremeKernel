@@ -174,6 +174,16 @@ if [[ "${KSU_OPTION,,}" == "y" ]]; then
     echo "-----------------------------------------------"
     rm -f drivers/kernelsu
     ln -sf "../${MANAGER_DIR}/kernel" drivers/kernelsu
+
+    # Inject pre-computed KSU_GIT_COUNT so Kbuild always bakes the correct version,
+    # even when git detection inside Kbuild fails (shallow clone, submodule gitdir quirks).
+    if [ -n "${KSU_GIT_COUNT:-}" ]; then
+        echo "-----------------------------------------------"
+        echo "Injecting KSU_GIT_VERSION=$KSU_GIT_COUNT into kernel build (CI override)"
+        echo "-----------------------------------------------"
+        MAKE_FLAGS+=("KSU_GIT_VERSION=$KSU_GIT_COUNT")
+        MAKE_FLAGS+=("KSU_GIT_VERSION_VALID=1")
+    fi
 fi
 
 # Android OS version mapping for mkbootimg
