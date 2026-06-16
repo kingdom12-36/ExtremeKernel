@@ -184,6 +184,10 @@ if [[ "${KSU_OPTION,,}" == "y" ]]; then
         MAKE_FLAGS+=("KSU_GIT_VERSION=$KSU_GIT_COUNT")
         MAKE_FLAGS+=("KSU_GIT_VERSION_VALID=1")
     fi
+    if [ -n "${KSU_VERSION:-}" ]; then
+        echo "Injecting KSUVER=$KSU_VERSION into kernel build (full version override)"
+        MAKE_FLAGS+=("KSUVER=$KSU_VERSION")
+    fi
 fi
 
 # Android OS version mapping for mkbootimg
