@@ -239,7 +239,7 @@ if [[ "${MANAGER:-ksun}" == "ksun" ]]; then
     echo "-----------------------------------------------"
     echo "Applying syscall hook patches (sys_reboot + others)..."
     echo "-----------------------------------------------"
-    curl -fsSL       "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/syscall_hook_patches.sh"       -o /tmp/syscall_hook_patches.sh       && bash /tmp/syscall_hook_patches.sh       || echo "syscall_hook_patches: failed or already applied — continuing."
+    bash build/patches/syscall_hook_patches.sh       || echo "syscall_hook_patches: failed or already applied — continuing."
     echo "-----------------------------------------------"
 fi
 # Build kernel image
