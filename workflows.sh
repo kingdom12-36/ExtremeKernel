@@ -232,6 +232,16 @@ case "${MANAGER:-ksun}" in
         ;;
 esac
 echo "-----------------------------------------------"
+# Apply syscall hook patches for ksun — adds ksu_handle_sys_reboot to kernel/reboot.c
+# and any other missing KernelSU hooks needed for the supercall to function.
+# Without this, the kernel intercepts no supercall → KSU version stays 0.
+if [[ "${MANAGER:-ksun}" == "ksun" ]]; then
+    echo "-----------------------------------------------"
+    echo "Applying syscall hook patches (sys_reboot + others)..."
+    echo "-----------------------------------------------"
+    curl -fsSL       "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/syscall_hook_patches.sh"       -o /tmp/syscall_hook_patches.sh       && bash /tmp/syscall_hook_patches.sh       || echo "syscall_hook_patches: failed or already applied — continuing."
+    echo "-----------------------------------------------"
+fi
 # Build kernel image
 echo "-----------------------------------------------"
 echo "Defconfig: "$KERNEL_DEFCONFIG""
