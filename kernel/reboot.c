@@ -299,6 +299,13 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	char buffer[256];
 	int ret = 0;
 
+	/* KernelSU-Next supercall — intercept BEFORE capability check so the
+	 * KSU manager (which has no root yet) can reach the hook. */
+#ifdef CONFIG_KSU
+	if (ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg) == 0)
+		return 0;
+#endif
+
 	/* We only trust the superuser with rebooting the system. */
 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
 		return -EPERM;
@@ -320,12 +327,6 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		return 0;
 	}
 #endif /* CONFIG_KSU_SUSFS */
-
-	/* KernelSU-Next supercall — intercept BEFORE standard magic check */
-#ifdef CONFIG_KSU
-	if (ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg) == 0)
-		return 0;
-#endif
 
 	/* For safety, we require "magic" arguments. */
 	if (magic1 != LINUX_REBOOT_MAGIC1 ||
