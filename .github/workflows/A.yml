@@ -14,8 +14,8 @@ jobs:
         include:
           - manager: ksun
             submodule: KernelSU-Next
-            version_base: 30000
-            version_offset: 15000
+            version_base: 40000
+            version_offset: 0
           - manager: ksu
             submodule: KernelSU
             version_base: 10200
@@ -146,8 +146,9 @@ jobs:
 
       - name: Setup KPatch-Next tools
         run: |
-          KPATCH_VER=$(curl -s https://api.github.com/repos/KernelSU-Next/KPatch-Next/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          KPATCH_VER=$(cat kpatch-version | tr -d '[:space:]')
           echo "KPATCH_VER=$KPATCH_VER" >> $GITHUB_ENV
+          echo "Using pinned KPatch-Next version: $KPATCH_VER"
 
           curl -Lo kptools        https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kptools-linux
           curl -Lo kpimg          https://github.com/KernelSU-Next/KPatch-Next/releases/download/${KPATCH_VER}/kpimg-linux
