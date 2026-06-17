@@ -280,7 +280,8 @@ static DEFINE_MUTEX(reboot_mutex);
  * so that some mistake won't make this reboot the whole machine.
  * You can also set the meaning of the ctrl-alt-del-key here.
 #ifdef CONFIG_KSU
-extern void ksu_handle_sys_reboot(void);
+extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+				 void __user **arg);
 #endif
 
  *
@@ -321,6 +322,12 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	}
 #endif /* CONFIG_KSU_SUSFS */
 
+	/* KernelSU-Next supercall — intercept BEFORE standard magic check */
+#ifdef CONFIG_KSU
+	if (ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg) == 0)
+		return 0;
+#endif
+
 	/* For safety, we require "magic" arguments. */
 	if (magic1 != LINUX_REBOOT_MAGIC1 ||
 			(magic2 != LINUX_REBOOT_MAGIC2 &&
@@ -345,9 +352,6 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		cmd = LINUX_REBOOT_CMD_HALT;
 
 	mutex_lock(&reboot_mutex);
-	#ifdef CONFIG_KSU
-	ksu_handle_sys_reboot();
-	#endif
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		kernel_restart(NULL);
