@@ -96,7 +96,8 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 #endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	if (likely(susfs_is_current_proc_umounted() && path->mnt)) {
+	if (likely(susfs_is_current_proc_umounted() && path->mnt &&
+		   real_mount(path->mnt)->mnt_id >= DEFAULT_KSU_MNT_ID)) {
 		no_sus_vfsmnt = susfs_get_non_sus_vfsmnt_from_vfsmnt(path->mnt);
 		if (path->mnt == no_sus_vfsmnt) {
 			dput(no_sus_vfsmnt->mnt_root);
